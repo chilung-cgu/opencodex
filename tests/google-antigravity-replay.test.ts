@@ -436,18 +436,20 @@ describe("antigravity replay fixed-size key identities", () => {
     expect(antigravityReplayKeyForTests(MODEL, SESSION)).toBe(antigravityReplayKeyForTests(MODEL, SESSION));
   });
 
-  test("canonicalization overflow skips the call without an unbounded intermediate", () => {
-    // Args whose canonical form exceeds 64 KiB: rejected DURING the walk.
+  test("large arguments stream into SHA-256 and preserve thought signatures across replay", () => {
+    // Large args (>64 KiB) derive a deterministic fixed-size key via incremental streaming
+    // without unbounded string allocation or dropping the thought signature (#1772).
     const bigArgs = { blob: "x".repeat(256 * 1024) };
-    expect(antigravityFunctionCallKeyForTests("f", bigArgs)).toBeUndefined();
+    const key = antigravityFunctionCallKeyForTests("f", bigArgs);
+    expect(typeof key).toBe("string");
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
     observeAntigravityReplay(MODEL, SESSION, [fcPart("f", bigArgs, "sig-1234567890abcdef")]);
     const metrics = antigravityReplayMetrics();
-    expect(metrics.calls).toBe(0);
-    expect(metrics.sessions).toBe(0);
-    expect(metrics.totalBytes).toBe(0);
-    // A conforming call right after still caches normally.
-    observeAntigravityReplay(MODEL, SESSION, [fcPart("g", { a: 1 }, "sig-1234567890abcdef")]);
-    expect(antigravityReplayMetrics().calls).toBe(1);
+    expect(metrics.calls).toBe(1);
+    expect(metrics.sessions).toBe(1);
+    const contents = [{ role: "model", parts: [fcPart("f", bigArgs)] }];
+    applyAntigravityReplay(MODEL, SESSION, contents);
+    expect((contents[0].parts[0] as { thoughtSignature?: string }).thoughtSignature).toBe("sig-1234567890abcdef");
   });
 
   test("canonical equality is preserved for nested structures", () => {

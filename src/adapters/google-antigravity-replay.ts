@@ -446,17 +446,37 @@ function canonicalJsonBounded(value: unknown, maxBytes: number): string | null {
  */
 function functionCallKey(name: unknown, args: unknown): string | undefined {
   if (typeof name !== "string" || name.length === 0) return undefined;
+  const hash = createHash("sha256");
+  updateHashWithString(hash, name);
   let canonical: string | null;
   try {
     canonical = canonicalJsonBounded(args ?? {}, REPLAY_MAX_CANONICAL_ARGS_BYTES);
   } catch {
-    canonical = "";
+    canonical = null;
   }
-  if (canonical === null) return undefined;
-  const hash = createHash("sha256");
-  updateHashWithString(hash, name);
-  updateHashWithString(hash, canonical);
-  return hash.digest("hex");
+  if (canonical !== null) {
+    updateHashWithString(hash, canonical);
+    return hash.digest("hex");
+  }
+  const buf = Buffer.allocUnsafe(8192);
+  let offset = 0;
+  const sink = (chunk: string) => {
+    for (let index = 0; index < chunk.length; index += 1) {
+      buf.writeUInt16LE(chunk.charCodeAt(index), offset);
+      offset += 2;
+      if (offset === buf.length) {
+        hash.update(buf);
+        offset = 0;
+      }
+    }
+  };
+  try {
+    writeCanonicalJson(args ?? {}, sink);
+    if (offset > 0) hash.update(buf.subarray(0, offset));
+    return hash.digest("hex");
+  } catch {
+    return undefined;
+  }
 }
 
 /** Test-only key-derivation seam: the fixed-key regression cannot go red
