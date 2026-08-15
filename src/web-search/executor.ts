@@ -58,7 +58,9 @@ export async function runWebSearch(
     model: settings.model,
     instructions: settings.describeImages ? BASE_INSTRUCTION + IMAGE_INSTRUCTION : BASE_INSTRUCTION,
     input: [{ type: "message", role: "user", content: [{ type: "input_text", text: query }] }],
-    tools: [hostedTool],
+    // The ChatGPT (codex) backend rejects extra web_search parameters (observed: "Unknown parameter:
+    // 'tools[0].max_results'"), so replay only the bare hosted tool shape.
+    tools: [{ type: "web_search" }],
     tool_choice: "auto",
     reasoning: { effort: settings.reasoning },
     // NOTE: the ChatGPT (codex) backend rejects `max_output_tokens` ("Unsupported parameter") and

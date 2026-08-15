@@ -32,6 +32,8 @@ interface WebSearchCall {
   // empty array means the model called the tool with neither `query` nor `queries` (handled as an
   // empty-query placeholder).
   queries: string[];
+  // Gemini/Antigravity thought signature from the original tool call, replayed on iteration #2 so the upstream functionCall part stays valid.
+  thoughtSignature?: string;
 }
 
 /**
@@ -69,7 +71,7 @@ export function scanEventsForWebSearch(events: AdapterEvent[]): {
   const passthrough: AdapterEvent[] = [];
   let hasRealToolCall = false;
   let hasMalformedToolCall = false;
-  let pending: { name: string; id: string; argsBuf: string; closed: boolean; events: AdapterEvent[] } | null = null;
+  let pending: { name: string; id: string; argsBuf: string; closed: boolean; signature?: string; events: AdapterEvent[] } | null = null;
   const isBlank = (value: string): boolean => value.trim().length === 0;
   const flushPending = (): void => {
     // A pending call that never saw tool_call_end is structurally malformed.
@@ -84,7 +86,7 @@ export function scanEventsForWebSearch(events: AdapterEvent[]): {
     if (e.type === "tool_call_start") {
       flushPending();
       if (isBlank(e.id) || isBlank(e.name)) hasMalformedToolCall = true;
-      pending = { name: e.name, id: e.id, argsBuf: "", closed: false, events: [e] };
+      pending = { name: e.name, id: e.id, argsBuf: "", closed: false, signature: e.thoughtSignature, events: [e] };
     } else if (e.type === "tool_call_delta") {
       // Orphan delta (no open call) is malformed.
       if (!pending) hasMalformedToolCall = true;
@@ -100,7 +102,7 @@ export function scanEventsForWebSearch(events: AdapterEvent[]): {
         pending.events.push(e);
         pending.closed = true;
         if (pending.name === WEB_SEARCH_TOOL_NAME) {
-          calls.push({ id: pending.id, queries: parseQueries(pending.argsBuf) });
+          calls.push({ id: pending.id, queries: parseQueries(pending.argsBuf), ...(pending.signature ? { thoughtSignature: pending.signature } : {}) });
         } else {
           passthrough.push(...pending.events);
           if (!isBlank(pending.id) && !isBlank(pending.name)) hasRealToolCall = true;
@@ -678,7 +680,7 @@ export async function runWithWebSearch(deps: WebSearchLoopDeps): Promise<Respons
         // Signed thinking must precede tool_use on replay (Anthropic extended thinking), and
         // unsigned raw reasoning has to ride along for providers that require it back (#688).
         ...precedingThinking,
-        { type: "toolCall" as const, id: call.id, name: WEB_SEARCH_TOOL_NAME, arguments: callArgs },
+        { type: "toolCall" as const, id: call.id, name: WEB_SEARCH_TOOL_NAME, arguments: callArgs, ...(call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {}) },
       ],
       timestamp: now,
     });

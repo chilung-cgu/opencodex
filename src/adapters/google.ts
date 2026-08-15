@@ -16,7 +16,7 @@ import { isAllowedToolChoice, namespacedToolName, resolveToolChoiceWireName, too
 import { contentPartsToText, parseDataUrl } from "./image";
 import { getVertexAccessToken } from "../lib/gcp-adc";
 import { fetchAntigravityWithRetry, fetchVertexWithRetry } from "./google-http";
-import { safeAntigravityHttpErrorMessage, safeVertexHttpErrorMessage } from "./google-errors";
+import { safeAntigravityHttpErrorMessage, safeGoogleHttpErrorMessage, safeVertexHttpErrorMessage } from "./google-errors";
 import { isVertexTruncatedTurn, vertexTruncationErrorMessage } from "./google-truncation";
 import { ANTIGRAVITY_REQUEST_UA, antigravitySessionId, isLikelyRealThoughtSignature, sanitizeAntigravityClaudeSignatures } from "./google-antigravity-wire";
 import { compileGoogleWireBody } from "./google-wire-compiler";
@@ -326,6 +326,7 @@ function artifactMarkdownUrl(filePath: string): string {
 interface GoogleResponsePart {
   text?: string;
   thought?: boolean;
+  thoughtSignature?: string;
   functionCall?: { name: string; args: unknown };
 }
 
@@ -361,10 +362,12 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       ? {
           fetchResponse: (request: AdapterRequest, ctx?: AdapterFetchContext): Promise<Response> =>
             (provider.googleMode === "cloud-code-assist" ? fetchAntigravityWithRetry : fetchVertexWithRetry)(request, ctx),
-          formatErrorBody: (status: number, _headers: Headers, payloadText: string): string =>
-            (provider.googleMode === "cloud-code-assist" ? safeAntigravityHttpErrorMessage : safeVertexHttpErrorMessage)(status, payloadText),
         }
       : {}),
+    // AI-Studio direct mode keeps the default server fetch path but still formats upstream error
+    // bodies (the web-search loop and server error path read formatErrorBody when present).
+    formatErrorBody: (status: number, _headers: Headers, payloadText: string): string =>
+      safeGoogleHttpErrorMessage("Gemini", status, payloadText),
 
     async buildRequest(parsed: OcxParsedRequest) {
       const routedModelId = provider.googleMode === "cloud-code-assist"
@@ -674,7 +677,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
               const id = `call_${crypto.randomUUID().slice(0, 8)}`;
               toolCallsStarted++;
               emittedContentEvent = true;
-              yield { type: "tool_call_start", id, name: restoreGoogleToolName(part.functionCall.name) };
+              yield { type: "tool_call_start", id, name: restoreGoogleToolName(part.functionCall.name), thoughtSignature: part.thoughtSignature };
               yield { type: "tool_call_delta", arguments: JSON.stringify(part.functionCall.args ?? {}) };
               yield { type: "tool_call_end" };
             }
@@ -890,7 +893,7 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
           if (part.functionCall) {
             const id = `call_${crypto.randomUUID().slice(0, 8)}`;
             toolCallsStarted++;
-            events.push({ type: "tool_call_start", id, name: restoreGoogleToolName(part.functionCall.name) });
+            events.push({ type: "tool_call_start", id, name: restoreGoogleToolName(part.functionCall.name), thoughtSignature: part.thoughtSignature });
             events.push({ type: "tool_call_delta", arguments: JSON.stringify(part.functionCall.args ?? {}) });
             events.push({ type: "tool_call_end" });
           }
