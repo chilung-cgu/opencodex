@@ -374,8 +374,14 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       : {}),
     // AI-Studio direct mode keeps the default server fetch path but still formats upstream error
     // bodies (the web-search loop and server error path read formatErrorBody when present).
-    formatErrorBody: (status: number, _headers: Headers, payloadText: string): string =>
-      safeGoogleHttpErrorMessage("Gemini", status, payloadText),
+    formatErrorBody: (status: number, _headers: Headers, payloadText: string): string => {
+      const label = provider.googleMode === "cloud-code-assist"
+        ? "Antigravity"
+        : provider.googleMode === "vertex"
+          ? "Vertex AI"
+          : "Gemini";
+      return safeGoogleHttpErrorMessage(label, status, payloadText);
+    },
 
     async buildRequest(parsed: OcxParsedRequest) {
       const routedModelId = provider.googleMode === "cloud-code-assist"

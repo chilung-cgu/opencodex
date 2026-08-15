@@ -256,7 +256,7 @@ describe("adapter fetchResponse wiring", () => {
     expect(typeof vertex.fetchResponse).toBe("function");
     expect(typeof vertex.formatErrorBody).toBe("function");
     expect(aistudio.fetchResponse).toBeUndefined();
-    expect(aistudio.formatErrorBody).toBeUndefined();
+    expect(typeof aistudio.formatErrorBody).toBe("function");
   });
 
   test("Vertex and Antigravity formatter hooks are provider-classified and leak-negative", async () => {
@@ -264,7 +264,8 @@ describe("adapter fetchResponse wiring", () => {
     const payload = vertexError(400, "INVALID_ARGUMENT", "Bearer secret-token at /Users/example/key.json");
     const vertex = createGoogleAdapter({ adapter: "google", googleMode: "vertex" } as never);
     const antigravity = createGoogleAdapter({ adapter: "google", googleMode: "cloud-code-assist" } as never);
-    for (const [adapter, label] of [[vertex, "Vertex AI"], [antigravity, "Antigravity"]] as const) {
+    const aistudio = createGoogleAdapter({ adapter: "google", apiKey: "k" } as never);
+    for (const [adapter, label] of [[vertex, "Vertex AI"], [antigravity, "Antigravity"], [aistudio, "Gemini"]] as const) {
       const text = adapter.formatErrorBody!(400, new Headers({ authorization: "Bearer header-secret" }), payload);
       expect(text).toContain(`${label} invalid request`);
       expect(text).not.toContain("secret-token");
