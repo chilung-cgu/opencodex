@@ -323,6 +323,11 @@ function artifactMarkdownUrl(filePath: string): string {
   return artifactHttpUrl(filePath).replace(/([()])/g, "\\$1");
 }
 
+/** Short stable fingerprint for replay-cache namespaces (never the raw secret). */
+function shortReplayFingerprint(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
 interface GoogleResponsePart {
   text?: string;
   thought?: boolean;
@@ -352,6 +357,9 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
   // another merely because the public model id and first prompt happen to match.
   let vertexReplayModel: string | undefined;
   let vertexReplaySession: string | undefined;
+  // AI-Studio direct mode shares the same stateless signature replay, namespaced below.
+  let directReplayModel: string | undefined;
+  let directReplaySession: string | undefined;
   let restoreGoogleToolName = (name: string): string => name;
   return {
     name: "google",
@@ -529,6 +537,15 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       headers["x-goog-api-key"] = apiKey;
 
       const compiled = compileGoogleWireBody(body);
+      // Direct (AI Studio) Gemini shares the stateless thought-signature replay cache with
+      // CCA/Vertex: signatures observed on the response stream are re-injected into replayed
+      // functionCall parts the client cannot round-trip, scoped per credential fingerprint +
+      // wire model so opaque tokens cannot cross keys or routes.
+      directReplayModel = `direct:${shortReplayFingerprint(provider.baseUrl ?? "")}:${shortReplayFingerprint(apiKey)}:${routedModelId}`;
+      directReplaySession = vertexReplaySessionId(parsed);
+      if (Array.isArray((compiled.body as { contents?: unknown[] }).contents)) {
+        applyAntigravityReplay(directReplayModel, directReplaySession, (compiled.body as { contents: unknown[] }).contents);
+      }
       restoreGoogleToolName = compiled.restoreToolName;
       return { url, method: "POST", headers, body: JSON.stringify(compiled.body) };
     },
@@ -587,9 +604,13 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
           const err = chunk.error as { message?: string } | undefined;
           // Clear-on-invalid: a signature rejection means our replayed thoughtSignatures are stale.
           // Drop the cache entry so the next turn starts clean instead of re-injecting a bad sig.
-          const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel : vertexReplayModel;
-          const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession : vertexReplaySession;
-          if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex")
+          const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel
+            : provider.googleMode === "vertex" ? vertexReplayModel
+            : directReplayModel;
+          const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession
+            : provider.googleMode === "vertex" ? vertexReplaySession
+            : directReplaySession;
+          if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex" || provider.googleMode === "ai-studio" || provider.googleMode == null)
             && replayModel && replaySession
             && /signature|invalid_argument|invalid argument/i.test(err?.message ?? "")) {
             clearAntigravityReplay(replayModel, replaySession);
@@ -645,9 +666,13 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         const parts = candidate.content?.parts as GoogleResponsePart[] | undefined;
         // Record Gemini thought signatures for the next stateless tool-result turn. Vertex and
         // Antigravity use separate model namespaces so opaque provider state cannot cross routes.
-        const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel : vertexReplayModel;
-        const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession : vertexReplaySession;
-        if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex")
+        const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel
+          : provider.googleMode === "vertex" ? vertexReplayModel
+          : directReplayModel;
+        const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession
+          : provider.googleMode === "vertex" ? vertexReplaySession
+          : directReplaySession;
+        if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex" || provider.googleMode === "ai-studio" || provider.googleMode == null)
           && parts && replayModel && replaySession) {
           observeAntigravityReplay(replayModel, replaySession, parts as unknown[]);
         }
@@ -867,9 +892,13 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
       if (candidates?.[0]?.content?.parts) {
         // Non-streaming Google-family response: observe thought signatures for the next turn,
         // using the same transport-scoped namespace as the streaming path.
-        const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel : vertexReplayModel;
-        const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession : vertexReplaySession;
-        if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex")
+        const replayModel = provider.googleMode === "cloud-code-assist" ? antigravityModel
+          : provider.googleMode === "vertex" ? vertexReplayModel
+          : directReplayModel;
+        const replaySession = provider.googleMode === "cloud-code-assist" ? antigravitySession
+          : provider.googleMode === "vertex" ? vertexReplaySession
+          : directReplaySession;
+        if ((provider.googleMode === "cloud-code-assist" || provider.googleMode === "vertex" || provider.googleMode === "ai-studio" || provider.googleMode == null)
           && replayModel && replaySession) {
           observeAntigravityReplay(replayModel, replaySession, candidates[0].content.parts as unknown[]);
         }
