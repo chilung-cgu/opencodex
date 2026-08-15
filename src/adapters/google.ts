@@ -16,7 +16,7 @@ import { isAllowedToolChoice, namespacedToolName, resolveToolChoiceWireName, too
 import { contentPartsToText, parseDataUrl } from "./image";
 import { getVertexAccessToken } from "../lib/gcp-adc";
 import { fetchAntigravityWithRetry, fetchVertexWithRetry } from "./google-http";
-import { safeAntigravityHttpErrorMessage, safeGoogleHttpErrorMessage, safeVertexHttpErrorMessage } from "./google-errors";
+import { safeGoogleHttpErrorMessage } from "./google-errors";
 import { isVertexTruncatedTurn, vertexTruncationErrorMessage } from "./google-truncation";
 import { ANTIGRAVITY_REQUEST_UA, antigravitySessionId, isLikelyRealThoughtSignature, sanitizeAntigravityClaudeSignatures } from "./google-antigravity-wire";
 import { compileGoogleWireBody } from "./google-wire-compiler";

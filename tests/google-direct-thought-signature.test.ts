@@ -119,4 +119,39 @@ describe("AI Studio direct thought-signature continuation", () => {
     const originalThread = await createGoogleAdapter(provider).buildRequest(scoped(continuation(), "thread-a"));
     expect(replayedFunctionCall(originalThread.body as string).thoughtSignature).toBe(SIGNATURE);
   });
+
+  test("signatures do not cross credential namespaces", async () => {
+    const firstAdapter = createGoogleAdapter(provider);
+    await firstAdapter.buildRequest(firstTurn(false));
+    await firstAdapter.parseResponse!(new Response(JSON.stringify(responseBody())));
+
+    const otherProvider = { ...provider, apiKey: "direct-other-key" } as OcxProviderConfig;
+    const otherCredential = await createGoogleAdapter(otherProvider).buildRequest(continuation());
+    expect(replayedFunctionCall(otherCredential.body as string).thoughtSignature).toBeUndefined();
+
+    const originalCredential = await createGoogleAdapter(provider).buildRequest(continuation());
+    expect(replayedFunctionCall(originalCredential.body as string).thoughtSignature).toBe(SIGNATURE);
+  });
+
+  test("upstream signature rejection clears the direct replay entry", async () => {
+    const firstAdapter = createGoogleAdapter(provider);
+    await firstAdapter.buildRequest(firstTurn(false));
+    await firstAdapter.parseResponse!(new Response(JSON.stringify(responseBody())));
+
+    const before = await createGoogleAdapter(provider).buildRequest(continuation());
+    expect(replayedFunctionCall(before.body as string).thoughtSignature).toBe(SIGNATURE);
+
+    const rejecting = new Response(
+      `data: ${JSON.stringify({ error: { message: "Function call is missing a thought_signature in functionCall parts" } })}\n\n`,
+      { headers: { "content-type": "text/event-stream" } },
+    );
+    const events: AdapterEvent[] = [];
+    const streamAdapter = createGoogleAdapter(provider);
+    await streamAdapter.buildRequest(firstTurn(false));
+    for await (const event of streamAdapter.parseStream(rejecting)) events.push(event);
+    expect(events.some(event => event.type === "error")).toBe(true);
+
+    const after = await createGoogleAdapter(provider).buildRequest(continuation());
+    expect(replayedFunctionCall(after.body as string).thoughtSignature).toBeUndefined();
+  });
 });
