@@ -17,7 +17,7 @@ import type {
 import { isAllowedToolChoice, namespacedToolName, resolveToolChoiceWireName, toolAllowedByChoice } from "../types";
 import { contentPartsToText, parseDataUrl } from "./image";
 import { getVertexAccessToken } from "../lib/gcp-adc";
-import { fetchAntigravityWithRetry, fetchVertexWithRetry } from "./google-http";
+import { fetchAntigravityWithRetry, fetchDirectGeminiWithRetry, fetchVertexWithRetry } from "./google-http";
 import { safeAntigravityHttpErrorMessage, safeVertexHttpErrorMessage } from "./google-errors";
 import { isVertexTruncatedTurn, vertexTruncationErrorMessage } from "./google-truncation";
 import { ANTIGRAVITY_REQUEST_UA, antigravitySessionId, isLikelyRealThoughtSignature, sanitizeAntigravityClaudeSignatures } from "./google-antigravity-wire";
@@ -377,8 +377,11 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
   return {
     name: "google",
 
-    // Vertex + Antigravity get Kiro-style retry/timeout + classified, redacted errors. AI-Studio
-    // Gemini keeps the default server fetch path (fetchResponse stays undefined so server.ts falls back).
+    // Vertex + Antigravity get Kiro-style retry/timeout + classified, redacted errors.
+    // AI-Studio direct keeps the default raw "Provider error <status>: <body>" surface and its
+    // single-shot 400 semantics, but gains the same bounded transient 429/5xx retry so the
+    // frequent "model is currently experiencing high demand" 503s are retried instead of
+    // failing the turn immediately.
     ...(provider.googleMode === "vertex" || provider.googleMode === "cloud-code-assist"
       ? {
           fetchResponse: (request: AdapterRequest, ctx?: AdapterFetchContext): Promise<Response> =>
@@ -386,7 +389,10 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
           formatErrorBody: (status: number, _headers: Headers, payloadText: string): string =>
             (provider.googleMode === "cloud-code-assist" ? safeAntigravityHttpErrorMessage : safeVertexHttpErrorMessage)(status, payloadText),
         }
-      : {}),
+      : {
+          fetchResponse: (request: AdapterRequest, ctx?: AdapterFetchContext): Promise<Response> =>
+            fetchDirectGeminiWithRetry(request, ctx),
+        }),
 
     async buildRequest(parsed: OcxParsedRequest) {
       const routedModelId = provider.googleMode === "cloud-code-assist"

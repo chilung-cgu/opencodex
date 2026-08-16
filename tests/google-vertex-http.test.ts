@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AdapterRequest } from "../src/adapters/base";
-import { fetchAntigravityWithRetry, fetchVertexWithRetry } from "../src/adapters/google-http";
+import { fetchAntigravityWithRetry, fetchDirectGeminiWithRetry, fetchVertexWithRetry } from "../src/adapters/google-http";
 import { safeVertexHttpErrorMessage, retryableGoogleStatus } from "../src/adapters/google-errors";
 
 const realFetch = globalThis.fetch;
@@ -212,6 +212,43 @@ describe("vertex retry fetch", () => {
     controller.abort();
     await expect(p).rejects.toBeDefined();
   });
+
+  test("direct AI Studio retries a transient 503 then returns the successful response", async () => {
+    const mock = mockFetch([
+      new Response(vertexError(503, "UNAVAILABLE", "This model is currently experiencing high demand."), { status: 503, headers: { "Retry-After": "0" } }),
+      new Response("ok", { status: 200 }),
+    ]);
+    const res = await fetchDirectGeminiWithRetry(request, { timeoutMs: 5_000 });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("ok");
+    expect(mock.calls).toHaveLength(2);
+  });
+
+  test("direct AI Studio keeps the raw final error body and does not replay repaired 400s", async () => {
+    const raw = vertexError(400, "INVALID_ARGUMENT", "tools.0.custom.input_schema: JSON schema is invalid");
+    const mock = mockFetch([
+      new Response(raw, { status: 400, headers: { "x-provider-error": "raw" } }),
+      new Response("ok", { status: 200 }),
+    ]);
+    const res = await fetchDirectGeminiWithRetry(request, { timeoutMs: 5_000 });
+    expect(res.status).toBe(400);
+    expect(res.headers.get("x-provider-error")).toBe("raw");
+    expect(await res.text()).toBe(raw);
+    expect(mock.calls).toHaveLength(1);
+  });
+
+  test("direct AI Studio retries transient rate-limit 429s (bounded, raw body on exhaustion)", async () => {
+    const raw = vertexError(429, "RESOURCE_EXHAUSTED", "rate limit, try again");
+    const mock = mockFetch([
+      new Response(raw, { status: 429, headers: { "Retry-After": "0" } }),
+      new Response(raw, { status: 429, headers: { "Retry-After": "0" } }),
+      new Response(raw, { status: 429, headers: { "Retry-After": "0", "x-final": "yes" } }),
+    ]);
+    const res = await fetchDirectGeminiWithRetry(request, { timeoutMs: 5_000 });
+    expect(mock.calls).toHaveLength(3);
+    expect(res.headers.get("x-final")).toBe("yes");
+    expect(await res.text()).toBe(raw);
+  });
 });
 
 describe("safeVertexHttpErrorMessage classification + redaction", () => {
@@ -249,13 +286,13 @@ describe("safeVertexHttpErrorMessage classification + redaction", () => {
 });
 
 describe("adapter fetchResponse wiring", () => {
-  test("vertex adapter exposes fetchResponse; ai-studio does not", async () => {
+  test("vertex and ai-studio adapters expose fetchResponse; ai-studio keeps default error formatting", async () => {
     const { createGoogleAdapter } = await import("../src/adapters/google");
     const vertex = createGoogleAdapter({ adapter: "google", baseUrl: "https://aiplatform.googleapis.com", googleMode: "vertex" } as never);
     const aistudio = createGoogleAdapter({ adapter: "google", baseUrl: "https://generativelanguage.googleapis.com", apiKey: "k" } as never);
     expect(typeof vertex.fetchResponse).toBe("function");
     expect(typeof vertex.formatErrorBody).toBe("function");
-    expect(aistudio.fetchResponse).toBeUndefined();
+    expect(typeof aistudio.fetchResponse).toBe("function");
     expect(aistudio.formatErrorBody).toBeUndefined();
   });
 
