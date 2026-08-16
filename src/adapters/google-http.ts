@@ -73,10 +73,11 @@ export async function fetchGoogleWithRetry(
       }
       // A 429 may be a transient rate limit (retry) or hard quota exhaustion (do NOT retry —
       // it won't recover for hours and burns retries). Peek the body to tell them apart.
-      if (res.status === 429 && !ctx.returnRawErrors) {
-        const peek = await readDisplaySafeErrorPayloadText(res, ctx.abortSignal);
+      if (res.status === 429) {
+        const peekTarget = ctx.returnRawErrors ? res.clone() : res;
+        const peek = await readDisplaySafeErrorPayloadText(peekTarget, ctx.abortSignal);
         if (isQuotaExhaustedBody(peek)) {
-          return normalizeUpstreamHttpErrorResponse(res, {
+          return ctx.returnRawErrors ? res : normalizeUpstreamHttpErrorResponse(res, {
             signal: ctx.abortSignal,
             formatMessage: payloadText => safeGoogleHttpErrorMessage(label, res.status, payloadText || peek),
           });

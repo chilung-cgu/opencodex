@@ -171,16 +171,16 @@ describe("vertex retry fetch", () => {
     expect(mock.calls).toHaveLength(1);
   });
 
-  test("raw quota errors keep bounded retry counts without body peeking", async () => {
+  test("raw mode does NOT retry a quota-exhausted 429 and preserves raw response", async () => {
     const raw = vertexError(429, "RESOURCE_EXHAUSTED", "Quota exceeded for billing");
     const mock = mockFetch([
-      new Response(raw, { status: 429, headers: { "Retry-After": "0" } }),
-      new Response(raw, { status: 429, headers: { "Retry-After": "0" } }),
-      new Response(raw, { status: 429, headers: { "Retry-After": "0", "x-final": "yes" } }),
+      new Response(raw, { status: 429, headers: { "Retry-After": "0", "x-raw-quota": "1" } }),
+      new Response("ok", { status: 200 }),
     ]);
     const res = await fetchVertexWithRetry(request, { timeoutMs: 5_000, returnRawErrors: true });
-    expect(mock.calls).toHaveLength(3);
-    expect(res.headers.get("x-final")).toBe("yes");
+    expect(mock.calls).toHaveLength(1);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("x-raw-quota")).toBe("1");
     expect(await res.text()).toBe(raw);
   });
 
@@ -235,6 +235,19 @@ describe("vertex retry fetch", () => {
     expect(res.headers.get("x-provider-error")).toBe("raw");
     expect(await res.text()).toBe(raw);
     expect(mock.calls).toHaveLength(1);
+  });
+
+  test("direct AI Studio does NOT retry a quota-exhausted 429 (single attempt, raw body returned)", async () => {
+    const raw = vertexError(429, "RESOURCE_EXHAUSTED", "Quota exceeded for quota metric 'Generate Content API requests'");
+    const mock = mockFetch([
+      new Response(raw, { status: 429, headers: { "Retry-After": "0", "x-direct-raw": "quota" } }),
+      new Response("ok", { status: 200 }),
+    ]);
+    const res = await fetchDirectGeminiWithRetry(request, { timeoutMs: 5_000 });
+    expect(mock.calls).toHaveLength(1);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("x-direct-raw")).toBe("quota");
+    expect(await res.text()).toBe(raw);
   });
 
   test("direct AI Studio retries transient rate-limit 429s (bounded, raw body on exhaustion)", async () => {
