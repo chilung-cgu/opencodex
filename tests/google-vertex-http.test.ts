@@ -262,6 +262,19 @@ describe("vertex retry fetch", () => {
     expect(res.headers.get("x-final")).toBe("yes");
     expect(await res.text()).toBe(raw);
   });
+
+  test("fetchGoogleWithRetry routes physical attempts through ctx.executor when provided", async () => {
+    const executorCalls: RequestInit[] = [];
+    const customExecutor: typeof fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      executorCalls.push(init ?? {});
+      return new Response("executor-ok", { status: 200 });
+    }) as typeof fetch;
+
+    const res = await fetchVertexWithRetry(request, { timeoutMs: 5_000, executor: customExecutor });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("executor-ok");
+    expect(executorCalls).toHaveLength(1);
+  });
 });
 
 describe("safeVertexHttpErrorMessage classification + redaction", () => {
@@ -299,13 +312,16 @@ describe("safeVertexHttpErrorMessage classification + redaction", () => {
 });
 
 describe("adapter fetchResponse wiring", () => {
-  test("vertex and ai-studio adapters expose fetchResponse; ai-studio keeps default error formatting", async () => {
+  test("vertex and antigravity adapters expose fetchResponse; ai-studio direct delegates to canonical server transport", async () => {
     const { createGoogleAdapter } = await import("../src/adapters/google");
     const vertex = createGoogleAdapter({ adapter: "google", baseUrl: "https://aiplatform.googleapis.com", googleMode: "vertex" } as never);
     const aistudio = createGoogleAdapter({ adapter: "google", baseUrl: "https://generativelanguage.googleapis.com", apiKey: "k" } as never);
+    const antigravity = createGoogleAdapter({ adapter: "google", baseUrl: "https://daily-cloudcode-pa.googleapis.com", googleMode: "cloud-code-assist" } as never);
     expect(typeof vertex.fetchResponse).toBe("function");
     expect(typeof vertex.formatErrorBody).toBe("function");
-    expect(typeof aistudio.fetchResponse).toBe("function");
+    expect(typeof antigravity.fetchResponse).toBe("function");
+    expect(typeof antigravity.formatErrorBody).toBe("function");
+    expect(aistudio.fetchResponse).toBeUndefined();
     expect(aistudio.formatErrorBody).toBeUndefined();
   });
 

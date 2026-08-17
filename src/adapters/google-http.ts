@@ -41,6 +41,7 @@ export async function fetchGoogleWithRetry(
 ): Promise<Response> {
   const repairInvalid400 = opts.repairInvalid400 ?? true;
   const timeoutMs = ctx.timeoutMs ?? 200_000;
+  const executor = ctx.executor ?? globalThis.fetch;
   let lastError: unknown;
   let activeRequest = request;
   let compatibilityReplayUsed = false;
@@ -51,7 +52,7 @@ export async function fetchGoogleWithRetry(
         method: activeRequest.method,
         headers: activeRequest.headers,
         body: activeRequest.body,
-      }, timeoutMs, ctx.abortSignal, ctx.stream);
+      }, timeoutMs, ctx.abortSignal, ctx.stream, executor);
       if (res.status === 400 && repairInvalid400 && !compatibilityReplayUsed) {
         let payloadText = "";
         try {
