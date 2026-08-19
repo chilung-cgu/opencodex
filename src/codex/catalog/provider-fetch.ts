@@ -1214,7 +1214,11 @@ async function fetchProviderModelsWithAuth(
     && prov.googleMode === "vertex"
     && (prov.models?.length ?? 0) === 0
     && Boolean(prov.defaultModel);
-  const configuredIds = seedVertexDefault && prov.defaultModel ? [prov.defaultModel] : (prov.models ?? []);
+  const configuredIds = Array.from(new Set([
+    ...(seedVertexDefault && prov.defaultModel ? [prov.defaultModel] : []),
+    ...(prov.models ?? []),
+    ...(prov.retainModels ?? []),
+  ]));
   const configured: CatalogModel[] = configuredIds.map(id => ({
     id,
     provider: name,
@@ -1609,6 +1613,7 @@ export function mergeConfiguredModelsIntoLiveCatalog(opts: {
   const out = [...opts.models];
   const present = new Set(out.map(model => model.id));
   const droppedConfiguredIds: string[] = [];
+  const providerRetainModels = Array.isArray(prov.retainModels) ? new Set(prov.retainModels) : undefined;
   for (const candidate of configured) {
     if (present.has(candidate.id)) continue;
     const dated = out.find(live => isDatedVariantId(live.id, candidate.id));
@@ -1621,6 +1626,7 @@ export function mergeConfiguredModelsIntoLiveCatalog(opts: {
       seedVertexDefault === true
       || shouldRetainConfiguredProviderModel(name, candidate.id)
       || (retainComboTargets && retainConfiguredModelIds?.has(candidate.id) === true)
+      || (providerRetainModels?.has(candidate.id) === true)
     ) {
       out.push(candidate);
       present.add(candidate.id);
