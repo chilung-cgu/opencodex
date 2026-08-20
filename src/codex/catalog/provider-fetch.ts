@@ -1346,17 +1346,7 @@ async function fetchProviderModelsWithAuth(
       // Live Max-Mode evidence feeds the umbrella resolver's ultra gate
       // (devlog 260828_cursor_umbrella_catalog; union with static evidence).
       recordLiveCursorMaxModeModels(liveResult.maxModeModels ?? []);
-      // retainModels is a config-level allowlist: fold retained ids back in so the
-      // merge below keeps them even when the Cursor plan does not report them.
-      const retainedIds = new Set(prov.retainModels ?? []);
-      const result = available.length > 0
-        ? [
-            ...available,
-            ...configured.filter(
-              candidate => retainedIds.has(candidate.id) && !available.some(existing => existing.id === candidate.id),
-            ),
-          ]
-        : configured;
+      const result = available.length > 0 ? available : configured;
       // Cache the discovery-filtered roster without combo retention so a later
       // gather can re-apply the current capture's retain set on read.
       const forCache = withConfiguredRetention(result, { retainComboTargets: false });
