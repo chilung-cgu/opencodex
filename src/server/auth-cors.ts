@@ -657,8 +657,6 @@ export function providerManagementConfigError(name: unknown, provider: unknown):
   if (structuredOutputOptOutError) return `provider ${name} ${structuredOutputOptOutError}`;
   const openRouterError = openRouterRoutingConfigError(typed);
   if (openRouterError) return `provider ${name} ${openRouterError}`;
-  const vercelError = vercelGatewayRoutingConfigError(typed);
-  if (vercelError) return `provider ${name} ${vercelError}`;
   if (typed.authMode === "local") {
     // "local" bypasses key-requirement enforcement (api-keys/key-failover treat non-oauth/
     // forward as key auth; openai-chat skips credential checks for local). Only providers
@@ -737,8 +735,6 @@ export function safeConfigDTO(config: OcxConfig): unknown {
       "modelMaxOutputTokens",
       "openRouterRouting",
       "modelOpenRouterRouting",
-      "vercelGatewayRouting",
-      "modelVercelGatewayRouting",
       "reasoningEfforts",
       "modelReasoningEfforts",
       "reasoningWireFormat",
