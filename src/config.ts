@@ -767,6 +767,59 @@ export function modelPreferHostedToolsConfigError(
   return null;
 }
 
+/**
+ * Validate a provider's per-model wire override map (#404).
+ *
+ * Rejects, rather than silently ignoring, configurations the resolver would refuse:
+ * a value outside the allowed wires, a model the upstream pins to one wire, and any
+ * override on a canonical forward provider (where switching wires would drop the
+ * caller's forwarded credential). Silently dropping them would leave the user
+ * believing an override is in effect.
+ */
+export function modelResponsesCompatibilityConfigError(
+  value: unknown,
+  field = "modelResponsesCompatibility",
+): string | null {
+  if (value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return `${field} must be a plain object`;
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key.trim() || key !== key.trim()) return `${field} keys must be nonblank trimmed model ids`;
+    if (entry !== "terminal-repair") {
+      return `${field}.${key} must be "terminal-repair"`;
+    }
+  }
+  return null;
+}
+
+export function modelResponsesTerminalRepairConfigError(
+  value: unknown,
+  field = "modelResponsesTerminalRepair",
+): string | null {
+  if (value === undefined) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return `${field} must be a plain object`;
+  for (const [key, entry] of Object.entries(value)) {
+    if (!key.trim() || key !== key.trim()) return `${field} keys must be nonblank trimmed model ids`;
+    const grace = typeof entry === "number" ? entry : (typeof entry === "object" && entry ? (entry as { graceMs?: unknown }).graceMs : null);
+    if (typeof grace !== "number" || !Number.isFinite(grace) || grace <= 0) {
+      return `${field}.${key} must be a positive number of milliseconds or { graceMs: number }`;
+    }
+  }
+  return null;
+}
+
+export function responsesTerminalRepairConfigError(
+  value: unknown,
+  field = "responsesTerminalRepair",
+): string | null {
+  if (value === undefined) return null;
+  if (value === "terminal-repair") return null;
+  const grace = typeof value === "number" ? value : (typeof value === "object" && value ? (value as { graceMs?: unknown }).graceMs : null);
+  if (typeof grace !== "number" || !Number.isFinite(grace) || grace <= 0) {
+    return `${field} must be "terminal-repair", a positive number of milliseconds, or { graceMs: number }`;
+  }
+  return null;
+}
+
 const CODEX_ACCOUNT_NAMESPACES_RECORD_ERROR =
   "codexAccountNamespaces must be a plain object mapping account selectors to Codex account ids";
 const CODEX_ACCOUNT_NAMESPACE_KEY_ERROR =
@@ -1296,6 +1349,36 @@ const configSchema = z.object({
         code: "custom",
         path: ["providers", redactSecretString(name), "modelAdapters"],
         message: modelAdaptersError,
+      });
+    }
+    const compatError = modelResponsesCompatibilityConfigError(
+      (provider as { modelResponsesCompatibility?: unknown }).modelResponsesCompatibility,
+    );
+    if (compatError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "modelResponsesCompatibility"],
+        message: compatError,
+      });
+    }
+    const modelRepairError = modelResponsesTerminalRepairConfigError(
+      (provider as { modelResponsesTerminalRepair?: unknown }).modelResponsesTerminalRepair,
+    );
+    if (modelRepairError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "modelResponsesTerminalRepair"],
+        message: modelRepairError,
+      });
+    }
+    const repairError = responsesTerminalRepairConfigError(
+      (provider as { responsesTerminalRepair?: unknown }).responsesTerminalRepair,
+    );
+    if (repairError) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["providers", redactSecretString(name), "responsesTerminalRepair"],
+        message: repairError,
       });
     }
     const preferHostedToolsError = modelPreferHostedToolsConfigError(
