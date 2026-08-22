@@ -6,7 +6,7 @@ import type {
   OcxReasoningReplayScopeRef,
   OcxUsage,
 } from "./types";
-import { coerceIntegerToolArguments } from "./lib/tool-argument-integers";
+import { coerceIntegerToolArguments, lookupToolParameterSchema } from "./lib/tool-argument-integers";
 import { adapterFailureFromMessage, classifyError, CYBER_POLICY_ERROR_CODE, isCyberPolicyCode, type OcxErrorPayload } from "./lib/errors";
 import { encodeCompactionSummary } from "./responses/compaction";
 import { isTruncatedStopReason, truncationReasonFor } from "./responses/truncated-stop-reason";
@@ -625,7 +625,7 @@ export function bridgeToResponsesSSE(
         // against the declared schema; a non-integral value stays an error.
         const argsStr = coerceIntegerToolArguments(
           currentToolCall.args || "{}",
-          options?.toolParameterSchemas?.get(currentToolCall.name),
+          lookupToolParameterSchema(options?.toolParameterSchemas, currentToolCall.name),
         );
         // Finalize streamed function-call arguments so Codex commits the call (incl. MCP / computer_use).
         if (!currentToolCall.freeform && !currentToolCall.toolSearch) {
@@ -1655,7 +1655,7 @@ function buildResponseJSONWithBudget(
     // the request declared, which is the pre-namespace-mapping `currentToolCallName`.
     const coercedArgs = coerceIntegerToolArguments(
       currentToolCallArgs,
-      options?.toolParameterSchemas?.get(currentToolCallName),
+      lookupToolParameterSchema(options?.toolParameterSchemas, currentToolCallName),
     );
     // Freeform tools serialize as custom_tool_call without extra_content; remember the
     // signature server-side regardless so the replayed call can be re-signed (#1735).

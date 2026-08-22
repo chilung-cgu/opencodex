@@ -26,7 +26,7 @@ import {
 } from "../../combos";
 import { isInjectionDebugEnabled } from "../../lib/debug-settings";
 import { injectionDebugLog } from "../../lib/injection-debug-log";
-import { modelInList, namespacedToolName, toolChoiceToolPredicate } from "../../types";
+import { modelInList, namespacedToolName, toolChoiceAliases, toolChoiceToolPredicate } from "../../types";
 import type { AdapterEvent, OcxConfig, OcxParsedRequest, OcxProviderConfig, OcxProviderContinuationState, OcxUsage } from "../../types";
 import {
   forceRefreshOAuthAccessSnapshot,
@@ -124,6 +124,12 @@ export function buildToolBridgeMaps(parsed: OcxParsedRequest, budget?: Translato
     // Retained by reference (the schema is already resident in parsed.context.tools),
     // so this adds a map entry rather than a copy of every tool's parameters.
     if (t.parameters && typeof t.parameters === "object") toolParameterSchemas.set(wireName, t.parameters);
+    if (t.parameters && typeof t.parameters === "object") {
+      for (const alias of toolChoiceAliases(t)) {
+        toolParameterSchemas.set(alias, t.parameters);
+      }
+      if (!toolParameterSchemas.has(t.name)) toolParameterSchemas.set(t.name, t.parameters);
+    }
     if (t.namespace) {
       budget?.chargeRetained(new TextEncoder().encode(JSON.stringify([wireName, t.namespace, t.name])).byteLength, { kind: "retained_collectors" });
       toolNsMap.set(wireName, { namespace: t.namespace, name: t.name, ...(t.freeform ? { freeform: true } : {}) });

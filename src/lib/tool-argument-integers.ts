@@ -36,6 +36,44 @@
 //
 // Anything without a declared `integer`/`string` type is never touched.
 
+/**
+ * Known Codex native tool-call property names that Rust deserializes as integers (e.g. u64, usize),
+ * even when the tool parameter schema declares `type: "number"`, `type: ["number", "null"]`, or is unresolvable.
+ * (Issue #2316: Grok serializes wait_agent timeout_ms as 120000.0, which Codex u64 rejects).
+ */
+export const CODEX_NATIVE_INTEGER_PROPERTY_NAMES = new Set([
+  "timeout_ms",
+  "yield_time_ms",
+  "max_tokens",
+  "max_output_tokens",
+  "session_id",
+  "line",
+  "start",
+  "end",
+  "priority",
+  "port",
+]);
+
+export function lookupToolParameterSchema(
+  toolParameterSchemas: ReadonlyMap<string, Record<string, unknown>> | undefined,
+  toolName: string | undefined,
+): Record<string, unknown> | undefined {
+  if (!toolParameterSchemas || !toolName) return undefined;
+  const direct = toolParameterSchemas.get(toolName);
+  if (direct) return direct;
+  const idx = toolName.indexOf("__");
+  if (idx !== -1) {
+    const bare = toolName.slice(idx + 2);
+    const bareMatch = toolParameterSchemas.get(bare);
+    if (bareMatch) return bareMatch;
+  } else {
+    for (const [key, schema] of toolParameterSchemas.entries()) {
+      if (key.endsWith(`__${toolName}`)) return schema;
+    }
+  }
+  return undefined;
+}
+
 /** JSON Schema subset we need; provider tool schemas are untrusted input. */
 type SchemaNode = Record<string, unknown>;
 
@@ -118,15 +156,27 @@ interface CoerceResult {
   changed: boolean;
 }
 
-function coerceValue(value: unknown, schema: SchemaNode | undefined, root: SchemaNode, depth: number): CoerceResult {
+function coerceValue(
+  value: unknown,
+  schema: SchemaNode | undefined,
+  root: SchemaNode,
+  depth: number,
+  propertyName?: string,
+): CoerceResult {
   // A hostile or deeply nested schema must not blow the stack.
   if (depth > 64) return { value, changed: false };
   const resolved = schema ? resolveRef(schema, root, new Set()) : undefined;
 
   if (typeof value === "number") {
-    if (!resolved) return { value, changed: false };
+    if (!resolved) {
+      if (propertyName && CODEX_NATIVE_INTEGER_PROPERTY_NAMES.has(propertyName) && safelyIntegral(value)) {
+        return { value, changed: true };
+      }
+      return { value, changed: false };
+    }
     const branches = compositionBranches(resolved);
-    const integerDeclared = declaresInteger(resolved) || branches.some(declaresInteger);
+    const integerDeclared = declaresInteger(resolved) || branches.some(declaresInteger) ||
+      (propertyName !== undefined && CODEX_NATIVE_INTEGER_PROPERTY_NAMES.has(propertyName) && (declaresNumeric(resolved) || branches.some(declaresNumeric)));
     if (!integerDeclared && safelyIntegral(value)) {
       // Issue #1938: a bare integer in a string-only field has exactly one faithful
       // string reading. A field that also accepts a numeric type keeps the number.
@@ -148,7 +198,7 @@ function coerceValue(value: unknown, schema: SchemaNode | undefined, root: Schem
     const itemSchema = resolved ? asSchema(resolved.items) : undefined;
     let changed = false;
     const next = value.map(entry => {
-      const result = coerceValue(entry, itemSchema, root, depth + 1);
+      const result = coerceValue(entry, itemSchema, root, depth + 1, propertyName);
       if (result.changed) changed = true;
       return result.value;
     });
@@ -164,7 +214,7 @@ function coerceValue(value: unknown, schema: SchemaNode | undefined, root: Schem
   const next: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(object)) {
     const childSchema = asSchema(properties?.[key]) ?? additional;
-    const result = coerceValue(entry, childSchema, root, depth + 1);
+    const result = coerceValue(entry, childSchema, root, depth + 1, key);
     if (result.changed) changed = true;
     next[key] = result.value;
   }
@@ -183,7 +233,7 @@ export function coerceIntegerToolArguments(
   args: string,
   parameters: Record<string, unknown> | undefined,
 ): string {
-  if (!parameters || !args) return args;
+  if (!args) return args;
   // Cheap reject: a payload with no digit cannot need either repair (integral-float
   // -> integer, or bare-integer -> string).
   if (!/\d/.test(args)) return args;
@@ -195,8 +245,8 @@ export function coerceIntegerToolArguments(
     // existing paths already handle them.
     return args;
   }
-  const root = parameters as SchemaNode;
-  const result = coerceValue(parsed, root, root, 0);
+  const root = (parameters ?? {}) as SchemaNode;
+  const result = coerceValue(parsed, parameters ? root : undefined, root, 0);
   if (!result.changed) return args;
   return JSON.stringify(result.value);
 }

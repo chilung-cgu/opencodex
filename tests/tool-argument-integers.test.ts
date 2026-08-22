@@ -259,3 +259,72 @@ describe("bare-integer-for-string tool argument repair (#1938)", () => {
   });
 });
 
+/** The multi-agent wait shape from the #2316 report: timeout_ms declared number, rejected as u64. */
+const MULTI_AGENT_WAIT_SCHEMA = {
+  type: "object",
+  properties: {
+    timeout_ms: { type: "number" },
+    targets: { type: "array", items: { type: "string" } },
+    temperature: { type: "number" },
+  },
+};
+
+describe("Codex native integer field repair for number-declared schemas (#2316)", () => {
+  test("repairs timeout_ms float emitted by Grok when schema declares type number", () => {
+    expect(coerceIntegerToolArguments('{"timeout_ms":120000.0}', MULTI_AGENT_WAIT_SCHEMA))
+      .toBe('{"timeout_ms":120000}');
+    expect(coerceIntegerToolArguments('{"timeout_ms":60000.0}', MULTI_AGENT_WAIT_SCHEMA))
+      .toBe('{"timeout_ms":60000}');
+  });
+
+  test("leaves non-integral float in timeout_ms untouched so it fails honestly", () => {
+    const raw = '{"timeout_ms":1.5}';
+    expect(coerceIntegerToolArguments(raw, MULTI_AGENT_WAIT_SCHEMA)).toBe(raw);
+  });
+
+  test("still never touches non-integer fields like temperature even when integral float", () => {
+    const raw = '{"temperature":1.0}';
+    expect(coerceIntegerToolArguments(raw, MULTI_AGENT_WAIT_SCHEMA)).toBe(raw);
+  });
+
+  test("repairs known native fields even if tool parameter schema is omitted or unresolvable", () => {
+    expect(coerceIntegerToolArguments('{"timeout_ms":120000.0}', undefined))
+      .toBe('{"timeout_ms":120000}');
+    expect(coerceIntegerToolArguments('{"yield_time_ms":60000.0}', undefined))
+      .toBe('{"yield_time_ms":60000}');
+  });
+
+  test("streaming bridge resolves schema across wire name and bare name aliases (#2316)", async () => {
+    const toolSchemas = new Map<string, Record<string, unknown>>([
+      ["multi_agent_v1__wait_agent", MULTI_AGENT_WAIT_SCHEMA],
+    ]);
+
+    // Model emits bare name wait_agent while schema was registered under multi_agent_v1__wait_agent
+    const frames = await collectSse(bridgeToResponsesSSE(replay([
+      { type: "tool_call_start", id: "call_wait", name: "wait_agent" },
+      { type: "tool_call_delta", arguments: '{"timeout_ms":120000.0,"temperature":1.0}' },
+      { type: "tool_call_end", id: "call_wait" },
+      { type: "done" },
+    ]), "grok-4.6", undefined, undefined, undefined, undefined, 2_000, { toolParameterSchemas: toolSchemas }));
+
+    const done = frames.find(f => f.event === "response.function_call_arguments.done");
+    expect(done?.data.arguments).toBe('{"timeout_ms":120000,"temperature":1}');
+  });
+
+  test("non-streaming bridge resolves schema for namespaced call when registered under bare name", () => {
+    const toolSchemas = new Map<string, Record<string, unknown>>([
+      ["wait_agent", MULTI_AGENT_WAIT_SCHEMA],
+    ]);
+
+    const body = buildResponseJSON([
+      { type: "tool_call_start", id: "call_wait", name: "multi_agent_v1__wait_agent" },
+      { type: "tool_call_delta", arguments: '{"timeout_ms":60000.0}' },
+      { type: "tool_call_end", id: "call_wait" },
+      { type: "done" },
+    ], "grok-4.6", { toolParameterSchemas: toolSchemas }) as Record<string, unknown>;
+
+    const output = body.output as Record<string, unknown>[];
+    const call = output.find(item => item.type === "function_call");
+    expect(call?.arguments).toBe('{"timeout_ms":60000}');
+  });
+});
