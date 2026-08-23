@@ -14,9 +14,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { safeConfigDTO, providerManagementConfigError } from "../src/server/auth-cors";
 import {
+  getDefaultConfig,
   modelResponsesCompatibilityConfigError,
   modelResponsesTerminalRepairConfigError,
   responsesTerminalRepairConfigError,
+  validateConfigCandidate,
 } from "../src/config";
 import type { OcxConfig } from "../src/types";
 import { enrichProviderFromRegistry, providerConfigSeed } from "../src/providers/derive";
@@ -1138,6 +1140,29 @@ describe("stateless Responses upstreams get no stateful parameters", () => {
         modelResponsesCompatibility: { "gpt-5": "terminal-repair" as const },
       };
       expect(providerModelResponsesTerminalRepair("openai", canonicalOpenAi, "gpt-5")).toBeUndefined();
+    });
+
+    test("validateConfigCandidate rejects every terminal-repair key on the canonical forward provider", () => {
+      const base = getDefaultConfig();
+      const entries = [
+        ["modelResponsesCompatibility", { "gpt-5": "terminal-repair" }],
+        ["modelResponsesTerminalRepair", { "gpt-5": 500 }],
+        ["responsesTerminalRepair", "terminal-repair"],
+      ] as const;
+
+      for (const [field, value] of entries) {
+        const result = validateConfigCandidate({
+          ...base,
+          providers: {
+            ...base.providers,
+            openai: { ...base.providers.openai!, [field]: value },
+          },
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error).toContain(`${field} is not supported on the canonical ChatGPT forward provider`);
+        }
+      }
     });
 
     test("duplicate case-folded keys fail closed on ambiguity", () => {

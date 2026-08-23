@@ -77,7 +77,7 @@ import {
   type ProviderCostOverlay,
 } from "./types";
 import type { OcxRuntimeRole } from "./types/config";
-import { OPENAI_CODEX_PROVIDER_ID } from "./providers/openai-tiers";
+import { isCanonicalOpenAiForwardProvider, OPENAI_CODEX_PROVIDER_ID } from "./providers/openai-tiers";
 import { modelAutoCompactTokenLimitsConfigError } from "./providers/auto-compact-budget";
 import { fastWireDeclarationError, hasFastWireCapabilityConflict } from "./providers/fastwire";
 import {
@@ -1374,6 +1374,9 @@ const configSchema = z.object({
     }
     const compatError = modelResponsesCompatibilityConfigError(
       (provider as { modelResponsesCompatibility?: unknown }).modelResponsesCompatibility,
+      "modelResponsesCompatibility",
+      name,
+      provider,
     );
     if (compatError) {
       ctx.addIssue({
@@ -1384,6 +1387,9 @@ const configSchema = z.object({
     }
     const modelRepairError = modelResponsesTerminalRepairConfigError(
       (provider as { modelResponsesTerminalRepair?: unknown }).modelResponsesTerminalRepair,
+      "modelResponsesTerminalRepair",
+      name,
+      provider,
     );
     if (modelRepairError) {
       ctx.addIssue({
@@ -1394,6 +1400,9 @@ const configSchema = z.object({
     }
     const repairError = responsesTerminalRepairConfigError(
       (provider as { responsesTerminalRepair?: unknown }).responsesTerminalRepair,
+      "responsesTerminalRepair",
+      name,
+      provider,
     );
     if (repairError) {
       ctx.addIssue({
