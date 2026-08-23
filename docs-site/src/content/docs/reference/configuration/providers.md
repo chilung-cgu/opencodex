@@ -95,7 +95,6 @@ differing backup and rewrites known legacy namespaced selected ids to bare ids.
 | `authMode?` | `"key" \| "forward" \| "oauth" \| "local"` | Authentication mode (default `key`). OAuth/subscription credentials are stored outside `config.json`; `local` is limited to providers whose registry entry permits it. |
 | `codexAccountMode?` | `"pool" \| "direct"` | Canonical `openai` only; defaults to Pool. Direct bypasses pool state. |
 | `refreshPolicy?` | `"proactive" \| "lazy-only" \| "disabled"` | Override this OAuth provider's Token Guardian policy. |
-| `auto_review_model` (Codex `config.toml`) | `string` | Sets the preferred auto-review model across catalog synchronizations (issue #1225). Stamped as `auto_review_model_override` on catalog entries. |
 | `reasoningEfforts?` | `string[]` | Provider-wide Codex reasoning labels to advertise and send. For `google`-adapter providers, a configured ladder also asserts `thinkingLevel` capability: direct and Vertex non-image requests send the selected effort as `generationConfig.thinkingConfig.thinkingLevel`, while Cloud Code Assist uses its envelope-specific path. |
 | `modelReasoningEfforts?` | `Record<string, string[]>` | Per-model labels. An empty list hides effort control. As with `reasoningEfforts`, each configured `google`-adapter ladder asserts `thinkingLevel` capability; direct and Vertex non-image requests use the flat Gemini path, while Cloud Code Assist sends it under its request envelope. |
 | `modelSupportsReasoningSummaries?` | `Record<string, boolean>` | Set a model to `false` to stop advertising summaries and strip summary-delivery fields. |
@@ -132,6 +131,21 @@ differing backup and rewrites known legacy namespaced selected ids to bare ids.
 | `desktopExecutor?` | `DesktopExecutorConfig` | Cursor only: external computer-use and record-screen commands. |
 | `unsafeAllowNativeLocalExec?` | `boolean` | Cursor legacy boolean, equivalent to `nativeLocalExec: "on"` only when the newer field is unset. |
 | `nativeLocalExec?` | `"off" \| "codex-sandbox" \| "on"` | Cursor local-exec policy. `off` is default; `codex-sandbox` currently fails closed like `off`. |
+
+## Codex catalog and root `config.toml` settings
+
+These settings belong in the root of `$CODEX_HOME/config.toml`, alongside
+`approvals_reviewer`; they are not provider fields.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `auto_review_model` | `string` | Public catalog selector in `provider/model` form, for example `opencode-go/deepseek-v4-flash`. After each catalog merge, OpenCodex resolves it against the final catalog and stamps the trimmed value as `auto_review_model_override` on catalog entries. Boundary whitespace is removed; the selector's slash-delimited components are otherwise unchanged. If the value is absent or blank, existing routed overrides are cleared and normal upstream auto-review selection is preserved. If it is syntactically invalid or absent from the final catalog (including after provider/model removal), OpenCodex fails closed for the override only: it clears the dead override, preserves normal upstream behavior, and emits a diagnostic. Re-adding the provider/model on a later sync allows the configured selector to be stamped again. |
+
+The setting is evaluated after provider discovery, model filtering, native/account-row
+projection, and merge precedence, so only a selector present in the catalog produced by
+that sync can become an override. Native upstream values are preserved when the setting is
+cleared or unresolved. The persisted catalog field is read by Codex for the current turn's
+model, which is why a valid configured selector is copied to each applicable entry.
 
 ### FastWire B1 capability migration
 

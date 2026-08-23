@@ -1413,18 +1413,118 @@ export function isValidAutoReviewModel(value: unknown): value is string {
     && !AUTO_REVIEW_MODEL_CONTROL_CHARS.test(trimmed);
 }
 
+export type AutoReviewModelOverrideResult = "absent" | "applied" | "invalid" | "unresolved";
+
+function isRoutedCatalogEntry(entry: RawEntry): boolean {
+  const slug = typeof entry.slug === "string" ? entry.slug : "";
+  return slug.includes("/")
+    || (typeof entry.description === "string" && entry.description.startsWith("Routed via opencodex → "));
+}
+
+function clearAutoReviewModelOverride(
+  models: readonly RawEntry[],
+  sourceModels: readonly RawEntry[] = [],
+): void {
+  const observedModels = [...models, ...sourceModels];
+  const configuredValues = new Set(observedModels.flatMap(entry => {
+    const value = entry?.auto_review_model_override;
+    return typeof value === "string" && value.trim() ? [value] : [];
+  }));
+  const globalStamp = configuredValues.size === 1
+    && observedModels.some(entry => {
+      const value = entry.auto_review_model_override;
+      return isRoutedCatalogEntry(entry)
+        && typeof value === "string"
+        && value.trim().length > 0
+        && configuredValues.has(value);
+    })
+    && observedModels.every(entry => {
+      const value = entry?.auto_review_model_override;
+      return value === null
+        || value === undefined
+        || (typeof value === "string" && configuredValues.has(value));
+    });
+  for (const entry of models) {
+    if (!entry || typeof entry !== "object") continue;
+    const current = entry.auto_review_model_override;
+    if (isRoutedCatalogEntry(entry)
+      || (globalStamp && typeof current === "string" && configuredValues.has(current))) {
+      entry.auto_review_model_override = null;
+    }
+  }
+}
+
+function warnAutoReviewModelDiagnostic(
+  reason: "invalid" | "unresolved",
+  configured: string,
+): void {
+  const safeConfigured = JSON.stringify(redactSecretString(configured));
+  const detail = reason === "unresolved"
+    ? "the selector was not found in the final catalog"
+    : "the selector format is invalid";
+  console.warn(
+    `[opencodex] auto_review_model ${detail} (${safeConfigured}); preserving normal upstream auto-review behavior.`,
+  );
+}
+
+function preserveNativeAutoReviewModelOverrides(
+  models: readonly RawEntry[],
+  sourceModels: readonly RawEntry[],
+): void {
+  const existing = new Map<string, string | null>();
+  for (const entry of sourceModels) {
+    const slug = typeof entry.slug === "string" ? entry.slug : undefined;
+    const value = entry.auto_review_model_override;
+    if (!slug || isRoutedCatalogEntry(entry)) continue;
+    if (typeof value === "string" || value === null) existing.set(slug, value);
+  }
+  for (const entry of models) {
+    const slug = typeof entry.slug === "string" ? entry.slug : undefined;
+    if (!slug || isRoutedCatalogEntry(entry) || !existing.has(slug)) continue;
+    entry.auto_review_model_override = existing.get(slug) ?? null;
+  }
+}
+
 export function applyAutoReviewModelOverride(
   models: RawEntry[] | undefined,
   autoReviewModel: string | null | undefined,
-): void {
-  if (!models || !Array.isArray(models) || !autoReviewModel) return;
+  sourceModels: readonly RawEntry[] = [],
+): AutoReviewModelOverrideResult {
+  if (!models || !Array.isArray(models)) return "absent";
+  if (autoReviewModel === null || autoReviewModel === undefined) {
+    clearAutoReviewModelOverride(models, sourceModels);
+    return "absent";
+  }
   const trimmed = autoReviewModel.trim();
-  if (!trimmed || !isValidAutoReviewModel(trimmed)) return;
+  if (!trimmed) {
+    clearAutoReviewModelOverride(models, sourceModels);
+    return "absent";
+  }
+  if (!isValidAutoReviewModel(trimmed)) {
+    clearAutoReviewModelOverride(models, sourceModels);
+    warnAutoReviewModelDiagnostic("invalid", trimmed);
+    return "invalid";
+  }
+  if (!configuredCatalogEntry(models, trimmed)) {
+    clearAutoReviewModelOverride(models, sourceModels);
+    warnAutoReviewModelDiagnostic("unresolved", trimmed);
+    return "unresolved";
+  }
   for (const entry of models) {
     if (entry && typeof entry === "object") {
       entry.auto_review_model_override = trimmed;
     }
   }
+  return "applied";
+}
+
+/** Apply the root Codex auto-review selector after the final catalog merge. */
+export function finalizeAutoReviewModelOverride(
+  models: RawEntry[] | undefined,
+  sourceModels: readonly RawEntry[] = [],
+): AutoReviewModelOverrideResult {
+  if (models && sourceModels.length > 0) preserveNativeAutoReviewModelOverrides(models, sourceModels);
+  return applyAutoReviewModelOverride(models, readConfiguredAutoReviewModel(), sourceModels);
 }
 
 function writeRetainedCatalogSync({
@@ -1620,10 +1720,7 @@ function writeRetainedCatalogSync({
     },
   });
   clampCatalogModelsToCodexSupport(catalog.models);
-  const autoReviewModel = readConfiguredAutoReviewModel();
-  if (autoReviewModel) {
-    applyAutoReviewModelOverride(catalog.models, autoReviewModel);
-  }
+  finalizeAutoReviewModelOverride(catalog.models, catalogModelsForMerge);
 
   const added = goEntries.length + accountBoundEntries.length;
   const content = `${JSON.stringify(catalog, null, 2)}\n`;

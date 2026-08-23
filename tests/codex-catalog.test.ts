@@ -5673,7 +5673,7 @@ describe("auto_review_model configuration (#1225)", () => {
     const { applyAutoReviewModelOverride } = require("../src/codex/catalog/sync");
     const entries = [
       { slug: "gpt-5.5", auto_review_model_override: null },
-      { slug: "opencode-go/glm-5.2", auto_review_model_override: null },
+      { slug: "opencode-go/deepseek-v4-flash", auto_review_model_override: null },
     ];
 
     applyAutoReviewModelOverride(entries, "  opencode-go/deepseek-v4-flash  ");
@@ -5681,16 +5681,19 @@ describe("auto_review_model configuration (#1225)", () => {
     expect(entries[1].auto_review_model_override).toBe("opencode-go/deepseek-v4-flash");
   });
 
-  test("applyAutoReviewModelOverride is a no-op when autoReviewModel is null or empty", () => {
+  test("applyAutoReviewModelOverride clears routed state when autoReviewModel is null or empty", () => {
     const { applyAutoReviewModelOverride } = require("../src/codex/catalog/sync");
     const entries = [
       { slug: "gpt-5.5", auto_review_model_override: "existing-model" },
+      { slug: "opencode-go/glm-5.2", auto_review_model_override: "old-model" },
     ];
 
     applyAutoReviewModelOverride(entries, null);
     expect(entries[0].auto_review_model_override).toBe("existing-model");
+    expect(entries[1].auto_review_model_override).toBeNull();
     applyAutoReviewModelOverride(entries, "   ");
     expect(entries[0].auto_review_model_override).toBe("existing-model");
+    expect(entries[1].auto_review_model_override).toBeNull();
   });
 
   test("applyAutoReviewModelOverride rejects invalid format with control chars or inner spaces", () => {
@@ -5719,7 +5722,7 @@ describe("auto_review_model configuration (#1225)", () => {
     // then the override is stamped before serialization.
     const entries = [
       { slug: "gpt-5.5", auto_review_model_override: null },
-      { slug: "opencode-go/glm-5.2", auto_review_model_override: "old-model" },
+      { slug: "opencode-go/deepseek-v4-flash", auto_review_model_override: "old-model" },
     ];
     const configuredValue = "  opencode-go/deepseek-v4-flash  ";
     const trimmedValue = configuredValue.trim();
@@ -5729,7 +5732,7 @@ describe("auto_review_model configuration (#1225)", () => {
     // Absent value: no override is written.
     applyAutoReviewModelOverride(entries, null);
     expect(entries[0].auto_review_model_override).toBeNull();
-    expect(entries[1].auto_review_model_override).toBe("old-model");
+    expect(entries[1].auto_review_model_override).toBeNull();
 
     // Present value: trimmed override replaces every entry (including native rows).
     applyAutoReviewModelOverride(entries, configuredValue);
