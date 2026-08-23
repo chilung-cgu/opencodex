@@ -206,7 +206,7 @@ describe("#1690 retainModels provider configuration", () => {
     expect(visible.map(m => m.id)).toEqual(["gemini-3.7-flash"]);
   });
 
-  test("warnRetainedModel404Once does not warn for non-retained models", () => {
+  test("warnRetainedModel404Once stays silent for a model that was never retained", () => {
     resetRetainedModelWarningsForTests();
     reconcileProviderFetchWarnings(1);
 
@@ -351,6 +351,7 @@ describe("catalog lifecycle and server 404 diagnostics for retained models", () 
     console.warn = (...args: any[]) => {
       warnCalls.push(args.join(" "));
     };
+    const retainedWarnings = () => warnCalls.filter(line => line.includes("is retained via retainModels"));
 
     const upstream = Bun.serve({
       port: 0,
@@ -399,8 +400,8 @@ describe("catalog lifecycle and server 404 diagnostics for retained models", () 
         }),
       });
       expect(response.status).toBe(404);
-      expect(warnCalls.length).toBe(1);
-      expect(warnCalls[0]).toContain('Model "retained-chat-model" on provider "test-chat-prov" is retained via retainModels');
+      expect(retainedWarnings()).toHaveLength(1);
+      expect(retainedWarnings()[0]).toContain('Model "retained-chat-model" on provider "test-chat-prov"');
     } finally {
       await server.stop(true);
       upstream.stop(true);
@@ -451,5 +452,131 @@ describe("catalog lifecycle and server 404 diagnostics for retained models", () 
 
     // Stale writer was rejected by setCached, so retainedWithoutDiscoveryRefs must not have retained-gen1!
     expect(isRetainedModelWithoutDiscoveryForTests("test-stale-prov", "retained-gen1")).toBe(false);
+  });
+
+  test("degraded catalog gather preserves prior retained model provenance", async () => {
+    const { fetchProviderModels } = await import("../src/codex/catalog/provider-fetch");
+    resetRetainedModelWarningsForTests();
+    clearModelCache();
+
+    let failDiscovery = false;
+    const prov: OcxProviderConfig = {
+      adapter: "openai-chat",
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "test-key",
+      retainModels: ["retained-model"],
+      fetch: (async (url: RequestInfo | URL) => {
+        if (String(url).includes("/models")) {
+          if (failDiscovery) {
+            return new Response("Internal Server Error", { status: 500 });
+          }
+          return new Response(JSON.stringify({ data: [{ id: "live-model" }] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200 });
+      }) as typeof fetch,
+    };
+
+    // 1. Authoritative gather registers retained-model provenance
+    const firstModels = await fetchProviderModels("test-degrade-prov", prov, 10);
+    expect(firstModels.map(m => m.id)).toEqual(["live-model", "retained-model"]);
+    expect(isRetainedModelWithoutDiscoveryForTests("test-degrade-prov", "retained-model")).toBe(true);
+
+    // 2. Degraded gather (upstream 500) must NOT erase retained model provenance
+    failDiscovery = true;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const secondModels = await fetchProviderModels("test-degrade-prov", prov, 10);
+    expect(secondModels.map(m => m.id)).toEqual(["live-model", "retained-model"]);
+    expect(isRetainedModelWithoutDiscoveryForTests("test-degrade-prov", "retained-model")).toBe(true);
+  });
+
+  test("Cursor and Antigravity retain configured combo targets in returned results but exclude from forCache", async () => {
+    const { gatherRoutedModels, clearGatherRoutedModelsInflight } = await import("../src/codex/catalog/provider-fetch");
+    const { getStaleCached } = await import("../src/codex/model-cache");
+    const { setFetchCursorUsableModelsForTests } = await import("../src/adapters/cursor/live-models");
+    const { withStubbedProviderFetch } = await import("./helpers/catalog-provider-fetch");
+    const { resetCatalogRuntimeStateForTests } = await import("../src/codex/catalog/sync");
+    resetRetainedModelWarningsForTests();
+    resetCatalogRuntimeStateForTests();
+    clearGatherRoutedModelsInflight();
+
+    const warnCalls: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: any[]) => {
+      warnCalls.push(args.join(" "));
+    };
+
+    const prevFetch = globalThis.fetch;
+    setFetchCursorUsableModelsForTests(async () => ({
+      ok: true,
+      models: ["gpt-5.5"],
+    }));
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      if (String(url).includes("fetchAvailableModels")) {
+        return new Response(JSON.stringify({
+          models: { "gemini-3.7-flash": { maxTokens: 1_048_576 } },
+          agentModelSorts: [{ groups: [{ modelIds: ["gemini-3.7-flash"] }] }],
+        }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const config = {
+        providers: {
+          "cursor-test": {
+            adapter: "cursor" as const,
+            baseUrl: "https://api.cursor.test",
+            apiKey: "test-key",
+            models: ["gpt-5.5", "retained-combo-cursor", "configured-ghost-cursor"],
+          },
+          "ag-test": {
+            adapter: "google" as const,
+            baseUrl: "https://daily-cloudcode-pa.googleapis.com",
+            apiKey: "test-key",
+            project: "test-project",
+            googleMode: "cloud-code-assist" as const,
+            models: ["gemini-3.7-flash", "retained-combo-ag", "configured-ghost-ag"],
+          },
+        },
+        combos: {
+          "combo-cursor": {
+            strategy: "failover" as const,
+            targets: [{ provider: "cursor-test", model: "retained-combo-cursor" }],
+          },
+          "combo-ag": {
+            strategy: "failover" as const,
+            targets: [{ provider: "ag-test", model: "retained-combo-ag" }],
+          },
+        },
+      };
+
+      const gathered = await gatherRoutedModels(withStubbedProviderFetch(config) as any);
+      const gatheredIds = gathered.map(m => m.id);
+      expect(gatheredIds).toContain("retained-combo-cursor");
+      expect(gatheredIds).toContain("retained-combo-ag");
+      expect(gatheredIds).toContain("gpt-5.5");
+      expect(gatheredIds).toContain("gemini-3.7-flash");
+      expect(gatheredIds).not.toContain("configured-ghost-cursor");
+      expect(gatheredIds).not.toContain("configured-ghost-ag");
+
+      // Cache excludes combo targets
+      expect(getStaleCached("cursor-test")?.map(m => m.id) ?? []).toEqual(["gpt-5.5"]);
+      expect(getStaleCached("ag-test")?.map(m => m.id) ?? []).toEqual(["gemini-3.7-flash"]);
+
+      // Drop warnings emitted for configured ghosts
+      const droppedWarnings = warnCalls.filter(msg => msg.includes("omitted configured model ids"));
+      expect(droppedWarnings.some(msg => msg.includes("configured-ghost-cursor"))).toBe(true);
+      expect(droppedWarnings.some(msg => msg.includes("configured-ghost-ag"))).toBe(true);
+    } finally {
+      setFetchCursorUsableModelsForTests(null);
+      globalThis.fetch = prevFetch;
+      console.warn = originalWarn;
+    }
   });
 });

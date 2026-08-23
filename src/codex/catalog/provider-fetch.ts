@@ -1243,7 +1243,11 @@ async function fetchProviderModelsWithAuth(
   // generation, so a request started with the former account cannot later publish its result.
   const cacheGeneration = captureModelCacheGeneration(name);
   const isCurrentCacheGeneration = () => isModelCacheGenerationCurrent(name, cacheGeneration);
-  function syncRetainedModelDiagnostics(models: readonly CatalogModel[]): void {
+  function syncRetainedModelDiagnostics(
+    models: readonly CatalogModel[],
+    state: CatalogGatherProviderModelOutcome["state"],
+  ): void {
+    if (state !== "authoritative") return;
     if (prov.liveModels === false || !Array.isArray(prov.retainModels) || prov.retainModels.length === 0) {
       retainedWithoutDiscoveryRefs.delete(name);
       return;
@@ -1263,7 +1267,7 @@ async function fetchProviderModelsWithAuth(
     state: CatalogGatherProviderModelOutcome["state"],
   ): ProviderModelsResult => {
     if (isCurrentCacheGeneration()) {
-      syncRetainedModelDiagnostics(models);
+      syncRetainedModelDiagnostics(models, state);
     }
     return { models, outcome: { provider: name, state } };
   };
