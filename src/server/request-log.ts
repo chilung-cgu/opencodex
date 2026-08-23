@@ -29,8 +29,13 @@ import {
   usageStatusForFinalLog,
   usageTotalTokens,
   type AttemptRecoveryKind,
+  type FailureSide,
+  type FailureStage,
   type PersistedUsageAttempt,
   type PersistedUsageEntry,
+  type StreamTimeline,
+  type TerminalSource,
+  type TransportPhase,
   type UsageStatus,
 } from "../usage/log";
 import {
@@ -50,6 +55,8 @@ import { modelRecordValue } from "../reasoning-effort";
 export interface RequestLogContext {
   model: string;
   provider: string;
+  /** Internal request start timestamp in wall-clock ms. */
+  requestStartedAt?: number;
   /** TTFT: ms from request start to the first non-empty model output delta (WP4, devlog 040). */
   firstOutputMs?: number;
   /** Best-effort chat/session correlation for Logs grouping (#330). Opaque; omit when unknown. */
@@ -134,8 +141,11 @@ export interface RequestLogContext {
   /** Structured reason from `response.incomplete`; internal-only input to log classification. */
   terminalIncompleteReason?: string;
   affinity?: "reused" | "new_bind" | "rebound" | "cleared";
-  transportPhase?: "pre_headers" | "mid_stream" | "terminal_sse";
-  terminalSource?: "upstream" | "synthetic";
+  transportPhase?: TransportPhase;
+  terminalSource?: TerminalSource;
+  streamTimeline?: StreamTimeline;
+  failureSide?: FailureSide;
+  failureStage?: FailureStage;
   /** Bounded route-decision trace (RI-01); never contains secrets. */
   routeDecision?: RouteDecisionTraceV1;
 }
@@ -198,9 +208,12 @@ export interface RequestLogEntry {
   /** Codex pool affinity decision for this request (diagnostics for #186). */
   affinity?: "reused" | "new_bind" | "rebound" | "cleared";
   /** Where the upstream terminal/failure was observed. */
-  transportPhase?: "pre_headers" | "mid_stream" | "terminal_sse";
+  transportPhase?: TransportPhase;
   /** Whether the terminal came from a real upstream SSE event or a proxy synthetic tail. */
-  terminalSource?: "upstream" | "synthetic";
+  terminalSource?: TerminalSource;
+  streamTimeline?: StreamTimeline;
+  failureSide?: FailureSide;
+  failureStage?: FailureStage;
   /** Bounded route-decision trace (RI-01); never contains secrets. */
   routeDecision?: RouteDecisionTraceV1;
 }
@@ -312,6 +325,11 @@ export function requestLogEntryFromPersistedUsage(entry: PersistedUsageEntry): R
     ...(entry.usage ? { usage: entry.usage } : {}),
     ...(entry.totalTokens !== undefined ? { totalTokens: entry.totalTokens } : {}),
     ...(entry.attempts !== undefined ? { attempts: entry.attempts } : {}),
+    ...(entry.streamTimeline ? { streamTimeline: entry.streamTimeline } : {}),
+    ...(entry.failureSide ? { failureSide: entry.failureSide } : {}),
+    ...(entry.failureStage ? { failureStage: entry.failureStage } : {}),
+    ...(entry.transportPhase ? { transportPhase: entry.transportPhase } : {}),
+    ...(entry.terminalSource ? { terminalSource: entry.terminalSource } : {}),
     ...(routeDecision ? { routeDecision } : {}),
   };
 }
@@ -430,6 +448,11 @@ export function addRequestLog(entry: RequestLogEntry) {
       ...(entry.totalTokens !== undefined ? { totalTokens: entry.totalTokens } : {}),
       ...(entry.attempts !== undefined ? { attempts: entry.attempts } : {}),
       ...failureDiagnostics,
+      ...(entry.streamTimeline ? { streamTimeline: entry.streamTimeline } : {}),
+      ...(entry.failureSide ? { failureSide: entry.failureSide } : {}),
+      ...(entry.failureStage ? { failureStage: entry.failureStage } : {}),
+      ...(entry.transportPhase ? { transportPhase: entry.transportPhase } : {}),
+      ...(entry.terminalSource ? { terminalSource: entry.terminalSource } : {}),
       ...(entry.routeDecision ? { routeDecision: entry.routeDecision } : {}),
     });
   } catch {
@@ -458,6 +481,30 @@ export function recordFirstOutput(
   if (logCtx.activeAttempt && logCtx.activeAttempt.firstOutputMs === undefined) {
     const attemptStartedAt = logCtx.activeAttemptStartedAt ?? requestStartedAt;
     logCtx.activeAttempt.firstOutputMs = Math.max(0, now - attemptStartedAt);
+  }
+}
+
+export function noteStreamTimelineEvent(
+  logCtx: RequestLogContext | undefined,
+  event: keyof StreamTimeline,
+  requestStartedAt?: number,
+  now = Date.now(),
+): void {
+  if (!logCtx) return;
+  if (requestStartedAt && !logCtx.requestStartedAt) {
+    logCtx.requestStartedAt = requestStartedAt;
+  }
+  if (!logCtx.streamTimeline) logCtx.streamTimeline = {};
+  const origin = requestStartedAt ?? logCtx.requestStartedAt ?? logCtx.activeAttemptStartedAt;
+  if (origin !== undefined && logCtx.streamTimeline[event] === undefined) {
+    logCtx.streamTimeline[event] = Math.max(0, now - origin);
+  }
+  if (logCtx.activeAttempt) {
+    if (!logCtx.activeAttempt.streamTimeline) logCtx.activeAttempt.streamTimeline = {};
+    const attemptOrigin = logCtx.activeAttemptStartedAt ?? requestStartedAt ?? logCtx.requestStartedAt;
+    if (attemptOrigin !== undefined && logCtx.activeAttempt.streamTimeline[event] === undefined) {
+      logCtx.activeAttempt.streamTimeline[event] = Math.max(0, now - attemptOrigin);
+    }
   }
 }
 
@@ -926,6 +973,7 @@ export function addFinalRequestLog(
   meta?: Pick<RequestLogEntry, "terminalStatus" | "closeReason">,
   addLog: (entry: RequestLogEntry) => void = addRequestLog,
 ): void {
+  if (!logCtx.requestStartedAt) logCtx.requestStartedAt = start;
   // Mid-stream web-search aborts used to emit response.failed and land as 502/upstream_server_error.
   // Prefer the client-close classification whenever the captured reason says so.
   const effectiveStatus = status >= 500 && logCtx.upstreamError && isClientClosedMessage(logCtx.upstreamError)
@@ -954,6 +1002,11 @@ export function addFinalRequestLog(
     // semantic code on both so detailed attempt telemetry cannot regress to a generic status code.
     if (errorCode) logCtx.activeAttempt.errorCode = errorCode;
     else delete logCtx.activeAttempt.errorCode;
+    if (logCtx.streamTimeline) logCtx.activeAttempt.streamTimeline = { ...logCtx.streamTimeline };
+    if (logCtx.failureSide) logCtx.activeAttempt.failureSide = logCtx.failureSide;
+    if (logCtx.failureStage) logCtx.activeAttempt.failureStage = logCtx.failureStage;
+    if (logCtx.transportPhase) logCtx.activeAttempt.transportPhase = logCtx.transportPhase;
+    if (logCtx.terminalSource) logCtx.activeAttempt.terminalSource = logCtx.terminalSource;
   }
   const existing = finalizedUsage(
     logCtx.providerAdapter ?? logCtx.provider,
@@ -1027,6 +1080,9 @@ export function addFinalRequestLog(
     ...(logCtx.affinity ? { affinity: logCtx.affinity } : {}),
     ...(logCtx.transportPhase ? { transportPhase: logCtx.transportPhase } : {}),
     ...(logCtx.terminalSource ? { terminalSource: logCtx.terminalSource } : {}),
+    ...(logCtx.streamTimeline ? { streamTimeline: logCtx.streamTimeline } : {}),
+    ...(logCtx.failureSide ? { failureSide: logCtx.failureSide } : {}),
+    ...(logCtx.failureStage ? { failureStage: logCtx.failureStage } : {}),
     ...(logCtx.routeDecision ? { routeDecision: logCtx.routeDecision } : {}),
   });
   if (isUsageDebugEnabled()) {
