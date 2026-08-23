@@ -2,7 +2,7 @@ import { baseProviderLabel } from "../providers/label";
 import { canonicalAntigravityUsageModel } from "../providers/antigravity-models";
 import { usageDisplayTotalTokens } from "./totals";
 import { isCodexUsageAccountLogLabel, type PersistedUsageEntry, type UsageStatus } from "./log";
-import { estimateAttemptCost, estimateComboCost, estimateRequestCost, serviceTierContext } from "./cost";
+import { type AttemptCostEstimate, type CostEstimate, estimateAttemptCost, estimateRequestCost, serviceTierContext, type ServiceTierContext } from "./cost";
 
 /**
  * Canonical range members. The warm-up loop in the management usage route
@@ -65,7 +65,6 @@ export interface UsageDayModel {
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
   cacheHitRate?: number | null;
-  /** Display-time estimated cost attributed to this provider/model on this day. */
   estimatedCostUsd?: number;
 }
 
@@ -165,6 +164,72 @@ export interface UsageFilterEcho {
    * distinct requests. Cost is unaffected.
    */
   comboOverlap: boolean;
+}
+
+export interface EntryCostInfo {
+  tier: ServiceTierContext;
+  estimate: CostEstimate | null;
+  attemptEstimates?: (AttemptCostEstimate | null)[];
+  costTotal: number;
+  isPriced: boolean;
+}
+
+export function cacheTokensFromUsage(usage?: PersistedUsageEntry["usage"]): {
+  read: number | undefined;
+  creation: number | undefined;
+  hasCacheTelemetry: boolean;
+} {
+  if (!usage) return { read: undefined, creation: undefined, hasCacheTelemetry: false };
+  const creation = usage.cacheCreationInputTokens;
+  const read = typeof usage.cacheReadInputTokens === "number"
+    ? usage.cacheReadInputTokens
+    : typeof usage.cachedInputTokens === "number" && typeof creation === "number"
+      ? Math.max(0, usage.cachedInputTokens - creation)
+      : usage.cachedInputTokens;
+  const hasCacheTelemetry = typeof usage.cachedInputTokens === "number"
+    || typeof usage.cacheReadInputTokens === "number"
+    || typeof usage.cacheCreationInputTokens === "number";
+  return { read, creation, hasCacheTelemetry };
+}
+
+export function calculateCacheHitRate(
+  cacheObserved: boolean,
+  inputTokens: number,
+  cacheReadTokens: number,
+): number | null {
+  if (!cacheObserved || inputTokens <= 0) return null;
+  return cacheReadTokens / inputTokens;
+}
+
+export function computeEntryCost(entry: PersistedUsageEntry): EntryCostInfo {
+  const tier = serviceTierContext(entry);
+  if (entry.attempts?.length) {
+    const attemptEstimates = entry.attempts.map(attempt =>
+      estimateAttemptCost(attempt, undefined, tier)
+    );
+    let costTotal = 0;
+    let isPriced = false;
+    for (const est of attemptEstimates) {
+      if (est) {
+        costTotal += est.cost.total;
+        isPriced = true;
+      }
+    }
+    return { tier, estimate: null, attemptEstimates, costTotal, isPriced };
+  }
+  const estimate = estimateRequestCost({
+    provider: entry.provider,
+    model: entry.model,
+    usage: entry.usage,
+    usageStatus: entry.usageStatus,
+    serviceTier: tier,
+  });
+  return {
+    tier,
+    estimate,
+    costTotal: estimate ? estimate.cost.total : 0,
+    isPriced: estimate !== null,
+  };
 }
 
 const DAY_MS = 86_400_000;
@@ -302,11 +367,6 @@ function usageModelKey(providerKey: string, model: string): string {
   return `${providerKey}/${model}`;
 }
 
-function antigravityUsageModel(provider: string, model: string): string {
-  if (baseProviderLabel(provider) !== "google-antigravity") return model;
-  return canonicalAntigravityUsageModel(model);
-}
-
 function usageAttributions(entry: PersistedUsageEntry): UsageAttribution[] {
   if (!entry.attempts?.length) {
     return [{
@@ -355,15 +415,7 @@ function addTokens(
   if (!entry.usage) return;
   totals.inputTokens += entry.usage.inputTokens;
   totals.outputTokens += entry.usage.outputTokens;
-  // Prefer the explicit read/write split; legacy claude-route rows stored read+write
-  // combined in cachedInputTokens with only the creation split present (devlog 070),
-  // so recover reads by subtracting the write share for those rows.
-  const creation = entry.usage.cacheCreationInputTokens;
-  const read = typeof entry.usage.cacheReadInputTokens === "number"
-    ? entry.usage.cacheReadInputTokens
-    : typeof entry.usage.cachedInputTokens === "number" && typeof creation === "number"
-      ? Math.max(0, entry.usage.cachedInputTokens - creation)
-      : entry.usage.cachedInputTokens;
+  const { read, creation } = cacheTokensFromUsage(entry.usage);
   if (typeof read === "number") {
     totals.cachedInputTokens += read;
     totals.cacheReadInputTokens += read;
@@ -379,61 +431,34 @@ function finalizeCoverage(totals: UsageSummaryTotals): void {
 
 function addEstimatedCost(
   totals: UsageSummaryTotals,
-  entry: Pick<PersistedUsageEntry, "provider" | "model" | "usageStatus" | "usage" | "attempts" | "responseServiceTier" | "requestedServiceTier" | "configuredServiceTier">,
+  entry: Pick<PersistedUsageEntry, "usageStatus" | "usage" | "attempts">,
+  costInfo: EntryCostInfo,
 ): void {
   if (entry.usageStatus === "unreported" || entry.usageStatus === "unsupported"
     || (!entry.usage && !entry.attempts?.length)) {
     totals.unmeteredRequests += 1;
     return;
   }
-  const tier = serviceTierContext(entry);
-  const estimate = entry.attempts?.length
-    ? estimateComboCost(entry.attempts, undefined, tier)
-    : estimateRequestCost({ provider: entry.provider, model: entry.model, usage: entry.usage, usageStatus: entry.usageStatus, serviceTier: tier });
-  if (!estimate) {
+  if (!costInfo.isPriced) {
     totals.unpricedRequests += 1;
     return;
   }
   totals.pricedRequests += 1;
-  totals.estimatedCostUsd += estimate.cost.total;
+  totals.estimatedCostUsd += costInfo.costTotal;
 }
 
-/**
- * Per-attribution cost for one entry, keyed by `provider/model`.
- *
- * Mirrors the attribution branch in {@link buildModels}: a combo request is
- * priced per attempt and each attempt's cost belongs to its own model, so cost
- * partitions across models rather than being counted once per participant. A
- * single-target request contributes its whole cost to the entry's own model.
- */
-function dayAttributionCosts(entry: PersistedUsageEntry): Map<string, number> {
-  const costs = new Map<string, number>();
-  const tier = serviceTierContext(entry);
-  const estimate = entry.attempts?.length
-    ? estimateComboCost(entry.attempts, undefined, tier)
-    : estimateRequestCost({ provider: entry.provider, model: entry.model, usage: entry.usage, usageStatus: entry.usageStatus, serviceTier: tier });
-  if (!estimate) return costs;
-  const add = (provider: string, model: string, amount: number): void => {
-    const key = usageModelKey(baseProviderLabel(provider), antigravityUsageModel(provider, model));
-    costs.set(key, (costs.get(key) ?? 0) + amount);
-  };
-  if (entry.attempts?.length && estimate.attempts) {
-    for (const attempt of estimate.attempts) add(attempt.provider, attempt.model, attempt.cost.total);
-  } else {
-    add(entry.provider, entry.model, estimate.cost.total);
-  }
-  return costs;
-}
-
-function buildDayGrid(range: UsageRange, since: number | null, now: number, entries: PersistedUsageEntry[]): UsageDay[] {
+function buildDayGrid(range: UsageRange, since: number | null, now: number, entries: PersistedUsageEntry[], costMap: Map<PersistedUsageEntry, EntryCostInfo>): UsageDay[] {
   const window = rangeWindow(range, now);
   const days = range === "all" ? dayCountForAllRange(entries, now) : window.days;
   const grid = new Map<string, UsageDay>();
   // Per-day model breakdown accumulator, keyed by day then provider/model, so the 7d bar chart can
   // render a per-model stacked bar with a hover tooltip without a second pass over the entries.
-  const dayModels = new Map<string, Map<string, UsageDayModel>>();
+  interface DayModelAccumulator extends UsageDayModel {
+    cacheObserved?: boolean;
+  }
+  const dayModels = new Map<string, Map<string, DayModelAccumulator>>();
   const dayModelRequests = new Map<string, Set<string>>();
-  const bumpDayModel = (dayKey: string, attribution: UsageAttribution, costUsd: number): void => {
+  const bumpDayModel = (dayKey: string, attribution: UsageAttribution): void => {
     let models = dayModels.get(dayKey);
     if (!models) { models = new Map(); dayModels.set(dayKey, models); }
     const providerKey = baseProviderLabel(attribution.provider);
@@ -451,7 +476,6 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
         cacheReadInputTokens: 0,
         cacheCreationInputTokens: 0,
         cacheHitRate: null,
-        estimatedCostUsd: 0,
       };
       models.set(mKey, m);
     }
@@ -464,17 +488,12 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
     if (attribution.usage) {
       m.inputTokens = (m.inputTokens ?? 0) + attribution.usage.inputTokens;
       m.outputTokens = (m.outputTokens ?? 0) + attribution.usage.outputTokens;
-      const creation = attribution.usage.cacheCreationInputTokens;
-      const read = typeof attribution.usage.cacheReadInputTokens === "number"
-        ? attribution.usage.cacheReadInputTokens
-        : typeof attribution.usage.cachedInputTokens === "number" && typeof creation === "number"
-          ? Math.max(0, attribution.usage.cachedInputTokens - creation)
-          : attribution.usage.cachedInputTokens;
+      const { read, creation, hasCacheTelemetry } = cacheTokensFromUsage(attribution.usage);
+      if (hasCacheTelemetry) m.cacheObserved = true;
       if (typeof read === "number") m.cacheReadInputTokens = (m.cacheReadInputTokens ?? 0) + read;
       if (typeof creation === "number") m.cacheCreationInputTokens = (m.cacheCreationInputTokens ?? 0) + creation;
     }
     m.totalTokens += usageDisplayTotalTokens(attribution.usage, attribution.totalTokens) ?? 0;
-    m.estimatedCostUsd += costUsd;
   };
   const startOfToday = startOfLocalDay(now);
   for (let i = days - 1; i >= 0; i--) {
@@ -494,27 +513,29 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
     if (isMeasuredStatus(entry.usageStatus)) day.measuredRequests += 1;
     if (entry.usageStatus === "reported") day.reportedRequests += 1;
     day.totalTokens += usageDisplayTotalTokens(entry.usage, entry.totalTokens) ?? 0;
-    for (const attribution of usageAttributions(entry)) bumpDayModel(key, attribution, 0);
-    const tier = serviceTierContext(entry);
-    const estimate = entry.attempts?.length
-      ? estimateComboCost(entry.attempts, undefined, tier)
-      : estimateRequestCost({ provider: entry.provider, model: entry.model, usage: entry.usage, usageStatus: entry.usageStatus, serviceTier: tier });
-    if (estimate) {
-      if (entry.attempts?.length && estimate.attempts) {
-        for (const attemptEst of estimate.attempts) {
-          const aProviderKey = baseProviderLabel(attemptEst.provider);
-          const aKey = usageModelKey(aProviderKey, antigravityUsageModel(attemptEst.provider, attemptEst.model));
-          const m = dayModels.get(key)?.get(aKey);
-          if (m) m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + attemptEst.cost.total;
+    for (const attribution of usageAttributions(entry)) bumpDayModel(key, attribution);
+    const costInfo = costMap.get(entry);
+    if (costInfo?.isPriced) {
+      if (entry.attempts?.length && costInfo.attemptEstimates) {
+        for (let i = 0; i < entry.attempts.length; i++) {
+          const attempt = entry.attempts[i];
+          const attemptEst = costInfo.attemptEstimates[i];
+          if (attemptEst) {
+            const aProviderKey = baseProviderLabel(attempt.provider);
+            const aIdentity = usageModelIdentity(attempt.provider, attempt.model);
+            const aKey = usageModelKey(aProviderKey, aIdentity.model);
+            const m = dayModels.get(key)?.get(aKey);
+            if (m) m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + attemptEst.cost.total;
+          }
         }
-      } else {
+      } else if (costInfo.estimate) {
         const providerKey = baseProviderLabel(entry.provider);
-        const mKey = usageModelKey(providerKey, antigravityUsageModel(entry.provider, entry.model));
+        const identity = usageModelIdentity(entry.provider, entry.model, entry.resolvedModel);
+        const mKey = usageModelKey(providerKey, identity.model);
         const m = dayModels.get(key)?.get(mKey);
-        if (m) m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + estimate.cost.total;
+        if (m) m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + costInfo.estimate.cost.total;
       }
-      day.estimatedCostUsd += estimate.cost.total;
-    }
+      day.estimatedCostUsd += costInfo.costTotal;
     }
   }
   void since;
@@ -523,9 +544,7 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
     const models = dayModels.get(day.date);
     if (models) {
       for (const m of models.values()) {
-        m.cacheHitRate = (m.inputTokens ?? 0) > 0 && (m.cacheReadInputTokens ?? 0) > 0
-          ? (m.cacheReadInputTokens ?? 0) / (m.inputTokens ?? 0)
-          : null;
+        m.cacheHitRate = calculateCacheHitRate(!!m.cacheObserved, m.inputTokens ?? 0, m.cacheReadInputTokens ?? 0);
       }
       const sorted = [...models.values()].sort((a, b) => b.requests - a.requests);
       day.models = retainedBreakdownRows(sorted, overflow => {
@@ -547,7 +566,7 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
           if (model.estimatedCostUsd !== undefined) {
             estimatedCostUsd = (estimatedCostUsd ?? 0) + model.estimatedCostUsd;
           }
-          const requestKey = `${day.date} ${usageModelKey(model.provider, model.model)}`;
+          const requestKey = `${day.date}\0${usageModelKey(model.provider, model.model)}`;
           for (const requestId of dayModelRequests.get(requestKey) ?? []) requests.add(requestId);
         }
         const cacheHitRate = inputTokens > 0 && cacheReadInputTokens > 0
@@ -572,8 +591,11 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
   return out;
 }
 
-function buildModels(entries: PersistedUsageEntry[], totalTokens: number): UsageModel[] {
-  const byKey = new Map<string, UsageModel>();
+function buildModels(entries: PersistedUsageEntry[], totalTokens: number, costMap: Map<PersistedUsageEntry, EntryCostInfo>): UsageModel[] {
+  interface ModelAccumulator extends UsageModel {
+    cacheObserved?: boolean;
+  }
+  const byKey = new Map<string, ModelAccumulator>();
   const statusesByKey = new Map<string, Map<string, UsageStatus[]>>();
   for (const entry of entries) {
     for (const attribution of usageAttributions(entry)) {
@@ -613,12 +635,8 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
       if (attribution.usage) {
         model.inputTokens += attribution.usage.inputTokens;
         model.outputTokens += attribution.usage.outputTokens;
-        const creation = attribution.usage.cacheCreationInputTokens;
-        const read = typeof attribution.usage.cacheReadInputTokens === "number"
-          ? attribution.usage.cacheReadInputTokens
-          : typeof attribution.usage.cachedInputTokens === "number" && typeof creation === "number"
-            ? Math.max(0, attribution.usage.cachedInputTokens - creation)
-            : attribution.usage.cachedInputTokens;
+        const { read, creation, hasCacheTelemetry } = cacheTokensFromUsage(attribution.usage);
+        if (hasCacheTelemetry) model.cacheObserved = true;
         if (typeof read === "number") {
           model.cachedInputTokens = (model.cachedInputTokens ?? 0) + read;
           model.cacheReadInputTokens = (model.cacheReadInputTokens ?? 0) + read;
@@ -644,53 +662,47 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
   const pricedRequestsByModel = new Map<string, Set<string>>();
   const unpricedRequestsByModel = new Map<string, Set<string>>();
   for (const entry of entries) {
-    const tier = serviceTierContext(entry);
-    const estimate = entry.attempts?.length
-      ? estimateComboCost(entry.attempts, undefined, tier)
-      : estimateRequestCost({ provider: entry.provider, model: entry.model, usage: entry.usage, usageStatus: entry.usageStatus, serviceTier: tier });
-    if (!estimate) {
-      if (entry.attempts?.length) {
-        for (const attempt of entry.attempts) {
-          const aProviderKey = baseProviderLabel(attempt.provider);
-          const aKey = usageModelKey(aProviderKey, antigravityUsageModel(attempt.provider, attempt.model));
+    const costInfo = costMap.get(entry);
+    if (entry.attempts?.length) {
+      const attemptEstimates = costInfo?.attemptEstimates;
+      for (let i = 0; i < entry.attempts.length; i++) {
+        const attempt = entry.attempts[i];
+        const attemptEst = attemptEstimates?.[i];
+        const aProviderKey = baseProviderLabel(attempt.provider);
+        const aIdentity = usageModelIdentity(attempt.provider, attempt.model);
+        const aKey = usageModelKey(aProviderKey, aIdentity.model);
+        if (attemptEst) {
+          const m = byKey.get(aKey);
+          if (m) {
+            m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + attemptEst.cost.total;
+          }
+          let s = pricedRequestsByModel.get(aKey);
+          if (!s) { s = new Set(); pricedRequestsByModel.set(aKey, s); }
+          s.add(entry.requestId);
+        } else {
           let s = unpricedRequestsByModel.get(aKey);
           if (!s) { s = new Set(); unpricedRequestsByModel.set(aKey, s); }
           s.add(entry.requestId);
         }
+      }
+    } else {
+      const providerKey = baseProviderLabel(entry.provider);
+      const identity = usageModelIdentity(entry.provider, entry.model, entry.resolvedModel);
+      const key = usageModelKey(providerKey, identity.model);
+      const estimate = costInfo?.estimate;
+      if (estimate) {
+        const m = byKey.get(key);
+        if (m) {
+          m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + estimate.cost.total;
+        }
+        let s = pricedRequestsByModel.get(key);
+        if (!s) { s = new Set(); pricedRequestsByModel.set(key, s); }
+        s.add(entry.requestId);
       } else {
-        const providerKey = baseProviderLabel(entry.provider);
-        const key = usageModelKey(providerKey, antigravityUsageModel(entry.provider, entry.model));
         let s = unpricedRequestsByModel.get(key);
         if (!s) { s = new Set(); unpricedRequestsByModel.set(key, s); }
         s.add(entry.requestId);
       }
-      continue;
-    }
-
-    if (entry.attempts?.length && estimate?.attempts) {
-      // Combo: attribute each attempt's cost to its own model
-      for (const attemptEst of estimate.attempts) {
-        const aProviderKey = baseProviderLabel(attemptEst.provider);
-        const aKey = usageModelKey(aProviderKey, antigravityUsageModel(attemptEst.provider, attemptEst.model));
-        const m = byKey.get(aKey);
-        if (m) {
-          m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + attemptEst.cost.total;
-        }
-        let s = pricedRequestsByModel.get(aKey);
-        if (!s) { s = new Set(); pricedRequestsByModel.set(aKey, s); }
-        s.add(entry.requestId);
-      }
-    } else {
-      // Single-target: attribute to the entry's model
-      const providerKey = baseProviderLabel(entry.provider);
-      const key = usageModelKey(providerKey, antigravityUsageModel(entry.provider, entry.model));
-      const m = byKey.get(key);
-      if (m) {
-        m.estimatedCostUsd = (m.estimatedCostUsd ?? 0) + estimate.cost.total;
-      }
-      let s = pricedRequestsByModel.get(key);
-      if (!s) { s = new Set(); pricedRequestsByModel.set(key, s); }
-      s.add(entry.requestId);
     }
   }
   const models = [...byKey.values()];
@@ -698,9 +710,7 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
     m.pricedRequests = pricedRequestsByModel.get(key)?.size ?? 0;
     m.unpricedRequests = unpricedRequestsByModel.get(key)?.size ?? 0;
     m.shareRatio = totalTokens === 0 ? 0 : m.totalTokens / totalTokens;
-    m.cacheHitRate = m.inputTokens > 0 && (m.cacheReadInputTokens ?? 0) > 0
-      ? (m.cacheReadInputTokens ?? 0) / m.inputTokens
-      : null;
+    m.cacheHitRate = calculateCacheHitRate(!!m.cacheObserved, m.inputTokens, m.cacheReadInputTokens ?? 0);
     m.priceCoverageRatio = m.requests > 0 ? m.pricedRequests / m.requests : 0;
   }
   const sorted = models.sort((a, b) => b.requests - a.requests);
@@ -708,7 +718,8 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
     const statusesByRequest = new Map<string, UsageStatus[]>();
     const overflowPricedRequests = new Set<string>();
     const overflowUnpricedRequests = new Set<string>();
-    const other: UsageModel = {
+    let cacheObserved = false;
+    const other: ModelAccumulator = {
       provider: "other",
       model: "other",
       requests: 0,
@@ -732,6 +743,7 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
       other.totalTokens += model.totalTokens;
       other.inputTokens += model.inputTokens;
       other.outputTokens += model.outputTokens;
+      if (model.cacheObserved) cacheObserved = true;
       other.cachedInputTokens = (other.cachedInputTokens ?? 0) + (model.cachedInputTokens ?? 0);
       other.cacheReadInputTokens = (other.cacheReadInputTokens ?? 0) + (model.cacheReadInputTokens ?? 0);
       other.cacheCreationInputTokens = (other.cacheCreationInputTokens ?? 0) + (model.cacheCreationInputTokens ?? 0);
@@ -757,16 +769,17 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number): Usage
       else if (status === "estimated") other.estimatedRequests += 1;
     }
     other.shareRatio = totalTokens === 0 ? 0 : other.totalTokens / totalTokens;
-    other.cacheHitRate = other.inputTokens > 0 && (other.cacheReadInputTokens ?? 0) > 0
-      ? (other.cacheReadInputTokens ?? 0) / other.inputTokens
-      : null;
+    other.cacheHitRate = calculateCacheHitRate(cacheObserved, other.inputTokens, other.cacheReadInputTokens ?? 0);
     other.priceCoverageRatio = other.requests > 0 ? other.pricedRequests / other.requests : 0;
     return other;
   });
 }
 
-function buildProviders(entries: PersistedUsageEntry[], totalTokens: number): UsageProvider[] {
-  const byKey = new Map<string, UsageProvider>();
+function buildProviders(entries: PersistedUsageEntry[], totalTokens: number, costMap: Map<PersistedUsageEntry, EntryCostInfo>): UsageProvider[] {
+  interface ProviderAccumulator extends UsageProvider {
+    cacheObserved?: boolean;
+  }
+  const byKey = new Map<string, ProviderAccumulator>();
   const statusesByKey = new Map<string, Map<string, UsageStatus[]>>();
   for (const entry of entries) {
     for (const attribution of usageAttributions(entry)) {
@@ -802,12 +815,8 @@ function buildProviders(entries: PersistedUsageEntry[], totalTokens: number): Us
       if (attribution.usage) {
         provider.inputTokens = (provider.inputTokens ?? 0) + attribution.usage.inputTokens;
         provider.outputTokens = (provider.outputTokens ?? 0) + attribution.usage.outputTokens;
-        const creation = attribution.usage.cacheCreationInputTokens;
-        const read = typeof attribution.usage.cacheReadInputTokens === "number"
-          ? attribution.usage.cacheReadInputTokens
-          : typeof attribution.usage.cachedInputTokens === "number" && typeof creation === "number"
-            ? Math.max(0, attribution.usage.cachedInputTokens - creation)
-            : attribution.usage.cachedInputTokens;
+        const { read, creation, hasCacheTelemetry } = cacheTokensFromUsage(attribution.usage);
+        if (hasCacheTelemetry) provider.cacheObserved = true;
         if (typeof read === "number") {
           provider.cachedInputTokens = (provider.cachedInputTokens ?? 0) + read;
           provider.cacheReadInputTokens = (provider.cacheReadInputTokens ?? 0) + read;
@@ -832,47 +841,43 @@ function buildProviders(entries: PersistedUsageEntry[], totalTokens: number): Us
   const pricedRequestsByProvider = new Map<string, Set<string>>();
   const unpricedRequestsByProvider = new Map<string, Set<string>>();
   for (const entry of entries) {
-    const tier = serviceTierContext(entry);
-    const estimate = entry.attempts?.length
-      ? estimateComboCost(entry.attempts, undefined, tier)
-      : estimateRequestCost({ provider: entry.provider, model: entry.model, usage: entry.usage, usageStatus: entry.usageStatus, serviceTier: tier });
-    if (!estimate) {
-      if (entry.attempts?.length) {
-        for (const attempt of entry.attempts) {
-          const aProviderKey = baseProviderLabel(attempt.provider);
+    const costInfo = costMap.get(entry);
+    if (entry.attempts?.length) {
+      const attemptEstimates = costInfo?.attemptEstimates;
+      for (let i = 0; i < entry.attempts.length; i++) {
+        const attempt = entry.attempts[i];
+        const attemptEst = attemptEstimates?.[i];
+        const aProviderKey = baseProviderLabel(attempt.provider);
+        if (attemptEst) {
+          const p = byKey.get(aProviderKey);
+          if (p) {
+            p.estimatedCostUsd = (p.estimatedCostUsd ?? 0) + attemptEst.cost.total;
+          }
+          let s = pricedRequestsByProvider.get(aProviderKey);
+          if (!s) { s = new Set(); pricedRequestsByProvider.set(aProviderKey, s); }
+          s.add(entry.requestId);
+        } else {
           let s = unpricedRequestsByProvider.get(aProviderKey);
           if (!s) { s = new Set(); unpricedRequestsByProvider.set(aProviderKey, s); }
           s.add(entry.requestId);
         }
+      }
+    } else {
+      const providerKey = baseProviderLabel(entry.provider);
+      const estimate = costInfo?.estimate;
+      if (estimate) {
+        const p = byKey.get(providerKey);
+        if (p) {
+          p.estimatedCostUsd = (p.estimatedCostUsd ?? 0) + estimate.cost.total;
+        }
+        let s = pricedRequestsByProvider.get(providerKey);
+        if (!s) { s = new Set(); pricedRequestsByProvider.set(providerKey, s); }
+        s.add(entry.requestId);
       } else {
-        const providerKey = baseProviderLabel(entry.provider);
         let s = unpricedRequestsByProvider.get(providerKey);
         if (!s) { s = new Set(); unpricedRequestsByProvider.set(providerKey, s); }
         s.add(entry.requestId);
       }
-      continue;
-    }
-
-    if (entry.attempts?.length && estimate?.attempts) {
-      for (const attemptEst of estimate.attempts) {
-        const aProviderKey = baseProviderLabel(attemptEst.provider);
-        const p = byKey.get(aProviderKey);
-        if (p) {
-          p.estimatedCostUsd = (p.estimatedCostUsd ?? 0) + attemptEst.cost.total;
-        }
-        let s = pricedRequestsByProvider.get(aProviderKey);
-        if (!s) { s = new Set(); pricedRequestsByProvider.set(aProviderKey, s); }
-        s.add(entry.requestId);
-      }
-    } else {
-      const providerKey = baseProviderLabel(entry.provider);
-      const p = byKey.get(providerKey);
-      if (p) {
-        p.estimatedCostUsd = (p.estimatedCostUsd ?? 0) + estimate.cost.total;
-      }
-      let s = pricedRequestsByProvider.get(providerKey);
-      if (!s) { s = new Set(); pricedRequestsByProvider.set(providerKey, s); }
-      s.add(entry.requestId);
     }
   }
   const providers = [...byKey.values()];
@@ -880,9 +885,7 @@ function buildProviders(entries: PersistedUsageEntry[], totalTokens: number): Us
     p.pricedRequests = pricedRequestsByProvider.get(key)?.size ?? 0;
     p.unpricedRequests = unpricedRequestsByProvider.get(key)?.size ?? 0;
     p.shareRatio = totalTokens === 0 ? 0 : p.totalTokens / totalTokens;
-    p.cacheHitRate = (p.inputTokens ?? 0) > 0 && (p.cacheReadInputTokens ?? 0) > 0
-      ? (p.cacheReadInputTokens ?? 0) / (p.inputTokens ?? 0)
-      : null;
+    p.cacheHitRate = calculateCacheHitRate(!!p.cacheObserved, p.inputTokens ?? 0, p.cacheReadInputTokens ?? 0);
     p.priceCoverageRatio = p.requests > 0 ? p.pricedRequests / p.requests : 0;
   }
   return providers.sort((a, b) => b.requests - a.requests);
@@ -911,7 +914,7 @@ function accountLabelForAttribution(provider: string, explicit: unknown): string
   return legacyCodexAccountLabel(provider);
 }
 
-function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
+function buildAccounts(entries: PersistedUsageEntry[], costMap: Map<PersistedUsageEntry, EntryCostInfo>): UsageAccount[] {
   const byLabel = new Map<string, UsageAccount>();
   const requestIds = new Map<string, Set<string>>();
 
@@ -922,7 +925,7 @@ function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
     usageStatus: UsageStatus;
     usage?: PersistedUsageEntry["usage"];
     totalTokens?: number;
-    estimate: ReturnType<typeof estimateRequestCost>;
+    estimate: AttemptCostEstimate | CostEstimate | null;
   }): void => {
     const label = accountLabelForAttribution(input.provider, input.accountLogLabel);
     if (!label) return;
@@ -965,12 +968,7 @@ function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
     else if (input.usageStatus === "estimated") row.estimatedAttempts += 1;
     row.inputTokens += input.usage!.inputTokens;
     row.outputTokens += input.usage!.outputTokens;
-    const creation = input.usage!.cacheCreationInputTokens;
-    const read = typeof input.usage!.cacheReadInputTokens === "number"
-      ? input.usage!.cacheReadInputTokens
-      : typeof input.usage!.cachedInputTokens === "number" && typeof creation === "number"
-        ? Math.max(0, input.usage!.cachedInputTokens - creation)
-        : input.usage!.cachedInputTokens;
+    const { read, creation } = cacheTokensFromUsage(input.usage);
     if (typeof read === "number") row.cacheReadInputTokens += read;
     if (typeof creation === "number") row.cacheCreationInputTokens += creation;
     if (typeof input.usage!.reasoningOutputTokens === "number") {
@@ -986,9 +984,11 @@ function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
   };
 
   for (const entry of entries) {
-    const tier = serviceTierContext(entry);
+    const costInfo = costMap.get(entry);
     if (entry.attempts?.length) {
-      for (const attempt of entry.attempts) {
+      for (let i = 0; i < entry.attempts.length; i++) {
+        const attempt = entry.attempts[i];
+        const attemptEst = costInfo?.attemptEstimates?.[i] ?? null;
         add({
           requestId: entry.requestId,
           provider: attempt.provider,
@@ -996,7 +996,7 @@ function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
           usageStatus: attempt.usageStatus,
           ...(attempt.usage ? { usage: attempt.usage } : {}),
           ...(attempt.totalTokens !== undefined ? { totalTokens: attempt.totalTokens } : {}),
-          estimate: estimateAttemptCost(attempt, undefined, tier),
+          estimate: attemptEst,
         });
       }
       continue;
@@ -1008,13 +1008,7 @@ function buildAccounts(entries: PersistedUsageEntry[]): UsageAccount[] {
       usageStatus: entry.usageStatus,
       ...(entry.usage ? { usage: entry.usage } : {}),
       ...(entry.totalTokens !== undefined ? { totalTokens: entry.totalTokens } : {}),
-      estimate: estimateRequestCost({
-        provider: entry.provider,
-        model: entry.model,
-        usage: entry.usage,
-        usageStatus: entry.usageStatus,
-        serviceTier: tier,
-      }),
+      estimate: costInfo?.estimate ?? null,
     });
   }
 
@@ -1042,12 +1036,16 @@ export function summarizeUsage(
     if (surface === "codex") return entry.surface === undefined;
     return true;
   });
+  const costMap = new Map<PersistedUsageEntry, EntryCostInfo>();
+  for (const entry of filteredEntries) {
+    costMap.set(entry, computeEntryCost(entry));
+  }
   const totals = blankTotals();
   for (const entry of filteredEntries) {
     bumpStatus(totals, entry.usageStatus);
     totals.attemptCount += entry.attempts?.length ?? 1;
     addTokens(totals, entry);
-    addEstimatedCost(totals, entry);
+    addEstimatedCost(totals, entry, costMap.get(entry)!);
   }
   finalizeCoverage(totals);
   return {
@@ -1056,10 +1054,10 @@ export function summarizeUsage(
     since,
     generatedAt: now,
     summary: totals,
-    days: buildDayGrid(range, since, now, filteredEntries),
-    models: buildModels(filteredEntries, totals.totalTokens),
-    providers: buildProviders(filteredEntries, totals.totalTokens),
-    accounts: buildAccounts(filteredEntries),
+    days: buildDayGrid(range, since, now, filteredEntries, costMap),
+    models: buildModels(filteredEntries, totals.totalTokens, costMap),
+    providers: buildProviders(filteredEntries, totals.totalTokens, costMap),
+    accounts: buildAccounts(filteredEntries, costMap),
   };
 }
 
@@ -1098,59 +1096,32 @@ export function projectUsageSummary<T extends UsageSummary>(
   const model = normalizeFilterValue(filter.model);
   if (provider === null && model === null) return summary;
 
-  // Re-summarise from the entries the summary was built from, rather than
-  // projecting over its rows.
-  //
-  // Projecting rows looked cheaper and was wrong in three ways that only show
-  // up together: breakdown rows past MAX_USAGE_MODEL_BREAKDOWN_ROWS are
-  // collapsed into a synthetic "other" row, so a provider living only in that
-  // tail is unfindable and reports matched:false despite real usage; a
-  // provider row is a whole-provider aggregate, so a model filter kept the
-  // provider's OTHER models in providers[] while models[] and the totals
-  // excluded them, contradicting itself inside one response; and a model row
-  // carries a single optional cost, so priced/unpriced/unmetered counts could
-  // only be guessed per model rather than counted per request.
-  //
-  // The entries are already in hand on every path that filters, so the honest
-  // computation is also the simple one.
   const matches = (rowProvider: string, rowModel: string): boolean => {
     if (provider !== null && baseProviderLabel(rowProvider).toLowerCase() !== provider) return false;
     if (model !== null && rowModel.toLowerCase() !== model) return false;
     return true;
   };
 
-  // Narrow to matching ATTRIBUTIONS, not matching entries.
-  //
-  // Keeping a whole combo entry because one of its attempts matched drags the
-  // other attempts' tokens and cost into the filtered totals: a two-attempt
-  // combo filtered to its cheap model reported the expensive model's spend
-  // too. Rewriting the entry down to its matching attempts is what makes the
-  // filtered numbers mean what the flag says.
   const source = entries ?? [];
   let comboOverlap = false;
   const filtered: PersistedUsageEntry[] = [];
   for (const entry of source) {
     if (!entry.attempts?.length) {
-      if (matches(entry.provider, antigravityUsageModel(entry.provider, entry.model))) filtered.push(entry);
+      const identity = usageModelIdentity(entry.provider, entry.model, entry.resolvedModel);
+      if (matches(entry.provider, identity.model)) filtered.push(entry);
       continue;
     }
-    const attempts = entry.attempts.filter(a => matches(a.provider, antigravityUsageModel(a.provider, a.model)));
+    const attempts = entry.attempts.filter(a => {
+      const identity = usageModelIdentity(a.provider, a.model);
+      return matches(a.provider, identity.model);
+    });
     if (attempts.length === 0) continue;
-    // A combo is still counted once per participating model, so a filtered
-    // request count can exceed the number of distinct requests. That is the
-    // documented overlap, and it is why comboOverlap exists.
     if (entry.attempts.length > 1) comboOverlap = true;
     filtered.push({ ...entry, attempts });
   }
 
   const projected = summarizeUsage(filtered, summary.range, summary.generatedAt, summary.surface);
-  // matched reflects usage inside the requested WINDOW, not anywhere in the
-  // log: summarizeUsage applies the range and surface predicates, and the CLI
-  // uses this flag to decide between a table and "no usage recorded".
   const matched = projected.summary.requests > 0;
-  // A combo entry survives the entry filter as a whole, so its non-matching
-  // attributions can still appear as rows. Drop those so every row in the
-  // response satisfies the filter the caller asked for.
   const models = projected.models.filter(row => matches(row.provider, row.model));
   const retainedProviders = new Set(models.map(row => row.provider));
   return {
@@ -1159,9 +1130,6 @@ export function projectUsageSummary<T extends UsageSummary>(
     days: projected.days.map(day => ({ ...day, models: day.models.filter(row => matches(row.provider, row.model)) })),
     models,
     providers: projected.providers.filter(row => retainedProviders.has(row.provider)),
-    // Account rows are not provider-partitioned in a way this projection could
-    // honestly re-derive, and unfiltered account totals sitting beside filtered
-    // model totals would invite exactly the wrong reading.
     accounts: [],
     filter: { provider, model, matched, comboOverlap },
   };

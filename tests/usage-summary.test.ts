@@ -101,7 +101,7 @@ describe("day-level estimated cost", () => {
     expect(day).toBeDefined();
     expect(day!.estimatedCostUsd).toBeGreaterThan(0);
 
-    const modelSum = day!.models.reduce((acc, m) => acc + m.estimatedCostUsd, 0);
+    const modelSum = day!.models.reduce((acc, m) => acc + (m.estimatedCostUsd ?? 0), 0);
     expect(day!.estimatedCostUsd).toBeCloseTo(modelSum, 10);
 
     const windowSum = sum.days.reduce((acc, d) => acc + d.estimatedCostUsd, 0);
@@ -123,7 +123,7 @@ describe("day-level estimated cost", () => {
     const sum = summarizeUsage(entries, "30d", at);
     const day = sum.days.find(d => d.requests === 1);
     expect(day).toBeDefined();
-    const modelSum = day!.models.reduce((acc, m) => acc + m.estimatedCostUsd, 0);
+    const modelSum = day!.models.reduce((acc, m) => acc + (m.estimatedCostUsd ?? 0), 0);
     expect(day!.estimatedCostUsd).toBeCloseTo(modelSum, 10);
     expect(day!.estimatedCostUsd).toBeCloseTo(sum.summary.estimatedCostUsd, 10);
   });
@@ -154,7 +154,7 @@ describe("day-level estimated cost", () => {
 
     // The window total prices each attempt once; the day must agree with it.
     expect(day!.estimatedCostUsd).toBeCloseTo(sum.summary.estimatedCostUsd, 10);
-    const modelSum = day!.models.reduce((acc, m) => acc + m.estimatedCostUsd, 0);
+    const modelSum = day!.models.reduce((acc, m) => acc + (m.estimatedCostUsd ?? 0), 0);
     expect(day!.estimatedCostUsd).toBeCloseTo(modelSum, 10);
   });
 
@@ -183,7 +183,7 @@ describe("day-level estimated cost", () => {
     expect(other).toBeDefined();
     expect(other!.estimatedCostUsd).toBeGreaterThan(0);
 
-    const modelSum = day!.models.reduce((acc, m) => acc + m.estimatedCostUsd, 0);
+    const modelSum = day!.models.reduce((acc, m) => acc + (m.estimatedCostUsd ?? 0), 0);
     expect(day!.estimatedCostUsd).toBeCloseTo(modelSum, 10);
   });
 });
@@ -856,8 +856,8 @@ describe("summarizeUsage", () => {
     ]);
     expect(sum.providers.some(provider => provider.provider === "combo")).toBe(false);
     expect(sum.days.find(day => day.requests === 1)?.models).toMatchObject([
-      { provider: "a", model: "model-a", requests: 1, attemptCount: 1, totalTokens: 100, estimatedCostUsd: 0 },
-      { provider: "b", model: "model-b", requests: 1, attemptCount: 1, totalTokens: 12, estimatedCostUsd: 0 },
+      { provider: "a", model: "model-a", requests: 1, attemptCount: 1, totalTokens: 100 },
+      { provider: "b", model: "model-b", requests: 1, attemptCount: 1, totalTokens: 12 },
     ]);
   });
 
@@ -1262,7 +1262,6 @@ describe("summarizeUsage", () => {
     expect(sonnet?.cacheReadInputTokens).toBe(600);
     expect(sonnet?.cacheCreationInputTokens).toBe(300);
     expect(sonnet?.cacheHitRate).toBeCloseTo(600 / 1500);
-    expect(sonnet?.priceCoverageRatio).toBe(1);
 
     const unpricedModel = summary.models.find(m => m.model === "unpriced-model");
     expect(unpricedModel).toBeDefined();
@@ -1277,7 +1276,6 @@ describe("summarizeUsage", () => {
     expect(anthropicProv?.cacheReadInputTokens).toBe(600);
     expect(anthropicProv?.cacheCreationInputTokens).toBe(300);
     expect(anthropicProv?.cacheHitRate).toBeCloseTo(600 / 1500);
-    expect(anthropicProv?.priceCoverageRatio).toBe(1);
 
     // Day model assertions
     const day = summary.days.find(d => d.models.some(m => m.model === "claude-sonnet-5"));
@@ -1288,6 +1286,93 @@ describe("summarizeUsage", () => {
     expect(daySonnet?.cacheReadInputTokens).toBe(600);
     expect(daySonnet?.cacheCreationInputTokens).toBe(300);
     expect(daySonnet?.cacheHitRate).toBeCloseTo(600 / 1500);
+    expect(daySonnet?.estimatedCostUsd).toBeGreaterThan(0);
+
+    const dayUnpriced = summary.days
+      .flatMap(d => d.models)
+      .find(m => m.model === "unpriced-model");
+    expect(dayUnpriced?.cacheHitRate).toBeNull();
+  });
+
+  test("attributes combo with mixed priced and unpriced attempts per attempt", () => {
+    const combo = entry({
+      ts: FIXED_NOW - 1000,
+      requestId: "combo-mixed-pricing",
+      provider: "combo",
+      model: "combo/native",
+      usageStatus: "reported",
+      usage: { inputTokens: 150, outputTokens: 15 },
+      totalTokens: 165,
+      attempts: [
+        {
+          ordinal: 1,
+          provider: "openai",
+          model: "gpt-5.5",
+          adapter: "openai-responses",
+          status: 502,
+          durationMs: 10,
+          sendCount: 1,
+          recoveryKinds: [],
+          usageStatus: "reported",
+          usage: { inputTokens: 100, outputTokens: 10 },
+          totalTokens: 110,
+        },
+        {
+          ordinal: 2,
+          provider: "unpriced-prov",
+          model: "unpriced-model",
+          adapter: "openai-responses",
+          status: 200,
+          durationMs: 20,
+          sendCount: 1,
+          recoveryKinds: [],
+          usageStatus: "reported",
+          usage: { inputTokens: 50, outputTokens: 5 },
+          totalTokens: 55,
+        },
+      ],
+    });
+
+    const sum = summarizeUsage([combo], "30d", FIXED_NOW);
+
+    // Totals should include the priced attempt's cost and count as priced
+    expect(sum.summary.pricedRequests).toBe(1);
+    expect(sum.summary.unpricedRequests).toBe(0);
+    const expectedCost = (100 * 5 + 10 * 30) / 1e6;
+    expect(sum.summary.estimatedCostUsd).toBeCloseTo(expectedCost, 9);
+
+    // Model breakdown
+    const gptModel = sum.models.find(m => m.model === "gpt-5.5");
+    expect(gptModel).toBeDefined();
+    expect(gptModel?.pricedRequests).toBe(1);
+    expect(gptModel?.unpricedRequests).toBe(0);
+    expect(gptModel?.priceCoverageRatio).toBe(1);
+    expect(gptModel?.estimatedCostUsd).toBeCloseTo(expectedCost, 9);
+
+    const unpricedModel = sum.models.find(m => m.model === "unpriced-model");
+    expect(unpricedModel).toBeDefined();
+    expect(unpricedModel?.pricedRequests).toBe(0);
+    expect(unpricedModel?.unpricedRequests).toBe(1);
+    expect(unpricedModel?.priceCoverageRatio).toBe(0);
+    expect(unpricedModel?.estimatedCostUsd).toBeUndefined();
+
+    // Provider breakdown
+    const openaiProv = sum.providers.find(p => p.provider === "openai");
+    expect(openaiProv).toBeDefined();
+    expect(openaiProv?.pricedRequests).toBe(1);
+    expect(openaiProv?.estimatedCostUsd).toBeCloseTo(expectedCost, 9);
+
+    const unpricedProv = sum.providers.find(p => p.provider === "unpriced-prov");
+    expect(unpricedProv).toBeDefined();
+    expect(unpricedProv?.unpricedRequests).toBe(1);
+    expect(unpricedProv?.estimatedCostUsd).toBeUndefined();
+
+    // Day models breakdown
+    const day = sum.days.find(d => d.requests > 0);
+    const dayGpt = day?.models.find(m => m.model === "gpt-5.5");
+    expect(dayGpt?.estimatedCostUsd).toBeCloseTo(expectedCost, 9);
+    const dayUnpriced = day?.models.find(m => m.model === "unpriced-model");
+    expect(dayUnpriced?.estimatedCostUsd).toBeUndefined();
   });
 
 });
