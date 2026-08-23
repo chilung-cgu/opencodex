@@ -549,9 +549,11 @@ Vercel AI Gateway can route a model across multiple underlying inference provide
 }
 ```
 
-Model keys are exact native OpenRouter ids, without the outer opencodex provider prefix. Selecting
-`openrouter/anthropic-claude-sonnet-5` restores native `anthropic/claude-sonnet-5` before applying
-the model rule.
+Model keys are Vercel public model selectors without the outer OpenCodex provider prefix. Selecting
+`vercel-ai-gateway/zai-glm-5.2` restores native `zai/glm-5.2` before applying the model rule. The
+same mapping applies to a native `vercel/<model-id>` selector: use the encoded
+`vercel-ai-gateway/vercel-<model-id>` selector in OpenCodex and keep `vercel/<model-id>` as the
+model key.
 
 ## Static model allowlists
 

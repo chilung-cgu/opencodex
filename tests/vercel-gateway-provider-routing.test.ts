@@ -5,6 +5,7 @@ import {
   vercelGatewayProviderPayload,
 } from "../src/providers/vercel-gateway-routing";
 import { fastPolicyForModel } from "../src/providers/service-tier";
+import { routeModel } from "../src/router";
 import { safeConfigDTO, providerManagementConfigError } from "../src/server/auth-cors";
 import type { OcxConfig, OcxParsedRequest, OcxProviderConfig } from "../src/types";
 
@@ -57,6 +58,32 @@ describe("Vercel AI Gateway configurable provider routing (#1406)", () => {
     expect(requestBody.provider).toEqual({
       only: ["deepinfra"], order: ["deepinfra"],
     });
+  });
+
+  test("routes the public Vercel selector before applying model routing on both Chat paths", () => {
+    const nativeModelId = "zai/glm-5.2";
+    const modelPreference = {
+      only: ["novita"],
+      order: ["novita", "deepinfra"],
+      sort: "ttft" as const,
+    };
+    const config: OcxConfig = {
+      port: 10100,
+      defaultProvider: "vercel-ai-gateway",
+      providers: {
+        "vercel-ai-gateway": provider("https://ai-gateway.vercel.sh/v1", {
+          models: [nativeModelId],
+          vercelGatewayRouting: { sort: "cost" },
+          modelVercelGatewayRouting: { [nativeModelId]: modelPreference },
+        }),
+      },
+    };
+
+    const route = routeModel(config, "vercel-ai-gateway/zai-glm-5.2");
+    expect(route.modelId).toBe(nativeModelId);
+    expect(JSON.parse(createOpenAIChatAdapter(route.provider).buildRequest(parsed(route.modelId)).body as string).provider)
+      .toEqual(modelPreference);
+    expect(passthroughBody(route.provider, route.modelId).provider).toEqual(modelPreference);
   });
 
   test("a model without an override inherits the default preference", () => {
