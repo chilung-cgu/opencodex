@@ -198,7 +198,7 @@ export function calculateCacheHitRate(
   cacheReadTokens: number,
 ): number | null {
   if (!cacheObserved || inputTokens <= 0) return null;
-  return cacheReadTokens / inputTokens;
+  return Math.max(0, Math.min(1, cacheReadTokens / inputTokens));
 }
 
 export function computeEntryCost(entry: PersistedUsageEntry): EntryCostInfo {

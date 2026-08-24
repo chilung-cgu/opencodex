@@ -1294,6 +1294,20 @@ describe("summarizeUsage", () => {
     expect(dayUnpriced?.cacheHitRate).toBeNull();
   });
 
+  test("clamps cache hit rate when cache reads exceed input tokens", () => {
+    const sum = summarizeUsage([
+      entry({
+        ts: FIXED_NOW - 1000,
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        usageStatus: "reported",
+        usage: { inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 150 },
+      }),
+    ], "30d", FIXED_NOW);
+
+    expect(sum.models[0]?.cacheHitRate).toBe(1);
+  });
+
   test("attributes combo with mixed priced and unpriced attempts per attempt", () => {
     const combo = entry({
       ts: FIXED_NOW - 1000,
