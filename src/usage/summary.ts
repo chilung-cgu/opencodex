@@ -388,6 +388,63 @@ function usageAttributions(entry: PersistedUsageEntry): UsageAttribution[] {
   }));
 }
 
+function projectedComboUsage(
+  attempts: readonly NonNullable<PersistedUsageEntry["attempts"]>[number][],
+): { usage?: PersistedUsageEntry["usage"]; totalTokens?: number } {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedInputTokens = 0;
+  let cacheReadInputTokens = 0;
+  let cacheCreationInputTokens = 0;
+  let reasoningOutputTokens = 0;
+  let hasUsage = false;
+  let hasCacheTelemetry = false;
+  let hasReasoningTelemetry = false;
+  let totalTokens = 0;
+  let hasTotalTokens = false;
+  let estimated = false;
+
+  for (const attempt of attempts) {
+    if (attempt.usage) {
+      hasUsage = true;
+      inputTokens += attempt.usage.inputTokens;
+      outputTokens += attempt.usage.outputTokens;
+      const cache = cacheTokensFromUsage(attempt.usage);
+      if (cache.hasCacheTelemetry) hasCacheTelemetry = true;
+      if (typeof cache.read === "number") {
+        cachedInputTokens += cache.read;
+        cacheReadInputTokens += cache.read;
+      }
+      if (typeof cache.creation === "number") cacheCreationInputTokens += cache.creation;
+      if (typeof attempt.usage.reasoningOutputTokens === "number") {
+        hasReasoningTelemetry = true;
+        reasoningOutputTokens += attempt.usage.reasoningOutputTokens;
+      }
+      if (attempt.usage.estimated === true) estimated = true;
+    }
+    const attemptTotal = usageDisplayTotalTokens(attempt.usage, attempt.totalTokens);
+    if (attemptTotal !== undefined) {
+      hasTotalTokens = true;
+      totalTokens += attemptTotal;
+    }
+  }
+
+  if (!hasUsage && !hasTotalTokens) return {};
+  const usage = hasUsage
+    ? {
+      inputTokens,
+      outputTokens,
+      ...(hasCacheTelemetry ? { cachedInputTokens, cacheReadInputTokens, cacheCreationInputTokens } : {}),
+      ...(hasReasoningTelemetry ? { reasoningOutputTokens } : {}),
+      ...(estimated ? { estimated: true } : {}),
+    }
+    : undefined;
+  return {
+    ...(usage ? { usage } : {}),
+    ...(hasTotalTokens ? { totalTokens } : {}),
+  };
+}
+
 function foldAttributionStatuses(statuses: readonly UsageStatus[]): UsageStatus {
   if (statuses.length > 0 && statuses.every(status => status === "unsupported")) {
     return "unsupported";
@@ -555,6 +612,7 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
         let outputTokens = 0;
         let cacheReadInputTokens = 0;
         let cacheCreationInputTokens = 0;
+        let cacheObserved = false;
         let estimatedCostUsd: number | undefined;
         for (const model of overflow) {
           attemptCount += model.attemptCount;
@@ -563,15 +621,14 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
           outputTokens += model.outputTokens ?? 0;
           cacheReadInputTokens += model.cacheReadInputTokens ?? 0;
           cacheCreationInputTokens += model.cacheCreationInputTokens ?? 0;
+          if (model.cacheObserved) cacheObserved = true;
           if (model.estimatedCostUsd !== undefined) {
             estimatedCostUsd = (estimatedCostUsd ?? 0) + model.estimatedCostUsd;
           }
           const requestKey = `${day.date}\0${usageModelKey(model.provider, model.model)}`;
           for (const requestId of dayModelRequests.get(requestKey) ?? []) requests.add(requestId);
         }
-        const cacheHitRate = inputTokens > 0 && cacheReadInputTokens > 0
-          ? cacheReadInputTokens / inputTokens
-          : null;
+        const cacheHitRate = calculateCacheHitRate(cacheObserved, inputTokens, cacheReadInputTokens);
         return {
           model: "other",
           provider: "other",
@@ -1117,7 +1174,8 @@ export function projectUsageSummary<T extends UsageSummary>(
     });
     if (attempts.length === 0) continue;
     if (entry.attempts.length > 1) comboOverlap = true;
-    filtered.push({ ...entry, attempts });
+    const { usage: _parentUsage, totalTokens: _parentTotalTokens, ...withoutParentUsage } = entry;
+    filtered.push({ ...withoutParentUsage, attempts, ...projectedComboUsage(attempts) });
   }
 
   const projected = summarizeUsage(filtered, summary.range, summary.generatedAt, summary.surface);

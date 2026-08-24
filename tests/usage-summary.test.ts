@@ -186,6 +186,28 @@ describe("day-level estimated cost", () => {
     const modelSum = day!.models.reduce((acc, m) => acc + (m.estimatedCostUsd ?? 0), 0);
     expect(day!.estimatedCostUsd).toBeCloseTo(modelSum, 10);
   });
+
+  test.each([
+    [0, 0],
+    [150, 1],
+  ])("the day overflow row preserves cache observation and clamps cache hit rate (%d reads)", (cacheRead, expected) => {
+    const total = MAX_USAGE_MODEL_BREAKDOWN_ROWS + 1;
+    const entries = Array.from({ length: total }, (_, i) => entry({
+      ts: at + i,
+      requestId: `overflow-cache-${i}`,
+      provider: "openai",
+      model: i === total - 1 ? "overflow-cache-tail" : `overflow-cache-${String(i).padStart(4, "0")}`,
+      usageStatus: "reported",
+      usage: i === total - 1
+        ? { inputTokens: 100, outputTokens: 1, cacheReadInputTokens: cacheRead }
+        : { inputTokens: 1, outputTokens: 1 },
+    }));
+
+    const sum = summarizeUsage(entries, "30d", at + total);
+    const day = sum.days.find(d => d.requests === total);
+    const other = day?.models.find(model => model.model === "other");
+    expect(other?.cacheHitRate).toBe(expected);
+  });
 });
 
 import { projectUsageSummary } from "../src/usage/summary";
@@ -241,6 +263,56 @@ describe("projectUsageSummary", () => {
       expect(row.requests).toBe(projected.summary.requests);
       expect(row.totalTokens).toBe(projected.summary.totalTokens);
     }
+  });
+
+  test("recomputes parent usage when filtering a combo to one attempt", () => {
+    const combo = entry({
+      ts: at,
+      requestId: "filtered-combo-parent-usage",
+      provider: "combo",
+      model: "combo/native",
+      usageStatus: "reported",
+      usage: { inputTokens: 150, outputTokens: 15 },
+      totalTokens: 165,
+      attempts: [
+        {
+          ordinal: 1,
+          provider: "openai",
+          model: "gpt-5.5",
+          adapter: "openai-responses",
+          status: 200,
+          durationMs: 10,
+          sendCount: 1,
+          recoveryKinds: [],
+          usageStatus: "reported",
+          usage: { inputTokens: 100, outputTokens: 10 },
+          totalTokens: 110,
+        },
+        {
+          ordinal: 2,
+          provider: "anthropic",
+          model: "claude-sonnet-5",
+          adapter: "anthropic",
+          status: 200,
+          durationMs: 20,
+          sendCount: 1,
+          recoveryKinds: [],
+          usageStatus: "reported",
+          usage: { inputTokens: 50, outputTokens: 5 },
+          totalTokens: 55,
+        },
+      ],
+    });
+    const projected = projectUsageSummary(
+      summarizeUsage([combo], "30d", at + 1),
+      { model: "gpt-5.5" },
+      [combo],
+    );
+    expect(projected.summary.inputTokens).toBe(100);
+    expect(projected.summary.outputTokens).toBe(10);
+    expect(projected.summary.totalTokens).toBe(110);
+    expect(projected.days.flatMap(day => day.models).find(model => model.model === "gpt-5.5")?.totalTokens).toBe(110);
+    expect(projected.models.find(model => model.model === "gpt-5.5")?.totalTokens).toBe(110);
   });
 
   test("unmetered and unpriced requests survive the projection", () => {
