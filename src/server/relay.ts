@@ -647,6 +647,7 @@ export function responseWithDeferredRequestLog(
   logCtx: RequestLogContext,
   addLog: (entry: RequestLogEntry) => void = addRequestLog,
 ): Response {
+  if (logCtx.requestStartedAt === undefined) logCtx.requestStartedAt = start;
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (isUsageDebugEnabled() && !logCtx.usageDebugContentType && contentType) {
     logCtx.usageDebugContentType = contentType;
@@ -1196,6 +1197,7 @@ export function createSseInspector(handlers: SseInspectorHandlers): SseInspector
 export type InspectionDrainBounds = { ms: number; bytes: number };
 
 export type InspectionConsumerOptions = {
+  requestStartedAt?: number;
   clientGoneSignal?: AbortSignal;
   drainBounds?: Partial<InspectionDrainBounds>;
   upstream?: AbortController;
@@ -1361,6 +1363,9 @@ export function consumeForInspection(
   onFirstOutput?: () => void,
   options?: InspectionConsumerOptions,
 ): void {
+  if (logCtx && options?.requestStartedAt !== undefined && logCtx.requestStartedAt === undefined) {
+    logCtx.requestStartedAt = options.requestStartedAt;
+  }
   const reader = body.getReader();
   const inspector = (options?.inspectorFactory ?? createSseInspector)({
     onTerminal,
@@ -1418,6 +1423,9 @@ export function consumeForResponseLogMetadata(
   onFirstOutput?: () => void,
   options?: InspectionConsumerOptions,
 ): void {
+  if (options?.requestStartedAt !== undefined && logCtx.requestStartedAt === undefined) {
+    logCtx.requestStartedAt = options.requestStartedAt;
+  }
   const reader = body.getReader();
   // No onTerminal → the inspector's `reported` gate stays permanently false,
   // reproducing this consumer's unconditional logCtx inspection.

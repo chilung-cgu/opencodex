@@ -1624,6 +1624,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "unknown",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
           inboundProtocol: "responses",
         };
@@ -1658,6 +1659,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "image_gen",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
         };
         const endpoint = url.pathname.endsWith("/edits") ? "edits" as const : "generations" as const;
@@ -1713,6 +1715,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "web_search",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
         };
         return runAdmittedHttpTurn(req, policy, async turnAdmissionLease => {
@@ -1737,6 +1740,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "unknown",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
           inboundProtocol: "responses",
         };
@@ -1811,6 +1815,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "unknown",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
           inboundProtocol: "messages",
         };
@@ -1841,6 +1846,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "unknown",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
           inboundProtocol: "chat",
         };
@@ -1872,6 +1878,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "gpt-live",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
         };
         return runAdmittedHttpTurn(req, policy, async turnAdmissionLease => {
@@ -1909,6 +1916,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const logCtx: RequestLogContext = {
           model: "gpt-live",
           provider: "unknown",
+          requestStartedAt: start,
           ...admissionFields(admission),
         };
         const turnAdmissionLease = tryAdmitTurn(sessionLaneIdFromRequest(req.headers));
@@ -2151,6 +2159,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
           const logCtx: RequestLogContext = {
             model: "unknown",
             provider: "unknown",
+            requestStartedAt: start,
             ...(wsAdmission ? admissionFields(wsAdmission) : {}),
             inboundProtocol: "responses",
           };

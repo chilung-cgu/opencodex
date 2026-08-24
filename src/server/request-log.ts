@@ -24,6 +24,7 @@ import {
   isKnownUsageSurface,
   isCodexUsageAccountLogLabel,
   isValidReasoningWireValue,
+  normalizeStreamDiagnostics,
   readRecentUsageEntries,
   usageForFinalLog,
   usageStatusForFinalLog,
@@ -386,10 +387,29 @@ export function addRequestLog(entry: RequestLogEntry) {
   // line-oriented viewer — while `usage.jsonl` looked clean, which is the worst shape for a
   // sanitization bug because the safe surface is the one you check.
   const shadowCallRewrittenFrom = sanitizeLogMetadataString(entry.shadowCallRewrittenFrom);
-  const retained: RequestLogEntry = shadowCallRewrittenFrom === entry.shadowCallRewrittenFrom
-    ? entry
-    : { ...entry, ...(shadowCallRewrittenFrom ? { shadowCallRewrittenFrom } : {}) };
-  if (!shadowCallRewrittenFrom && retained !== entry) delete retained.shadowCallRewrittenFrom;
+  const diagnostics = normalizeStreamDiagnostics(entry);
+  const attempts = entry.attempts?.map(attempt => {
+    const normalized = { ...attempt };
+    const attemptDiagnostics = normalizeStreamDiagnostics(attempt);
+    if (!attemptDiagnostics.streamTimeline) delete normalized.streamTimeline;
+    if (!attemptDiagnostics.failureSide) delete normalized.failureSide;
+    if (!attemptDiagnostics.failureStage) delete normalized.failureStage;
+    if (!attemptDiagnostics.transportPhase) delete normalized.transportPhase;
+    if (!attemptDiagnostics.terminalSource) delete normalized.terminalSource;
+    return { ...normalized, ...attemptDiagnostics };
+  });
+  const retained: RequestLogEntry = {
+    ...entry,
+    ...(shadowCallRewrittenFrom ? { shadowCallRewrittenFrom } : {}),
+    ...(attempts ? { attempts } : {}),
+    ...diagnostics,
+  };
+  if (!shadowCallRewrittenFrom) delete retained.shadowCallRewrittenFrom;
+  if (!diagnostics.streamTimeline) delete retained.streamTimeline;
+  if (!diagnostics.failureSide) delete retained.failureSide;
+  if (!diagnostics.failureStage) delete retained.failureStage;
+  if (!diagnostics.transportPhase) delete retained.transportPhase;
+  if (!diagnostics.terminalSource) delete retained.terminalSource;
   entry = retained;
   retainRequestLogEntry(entry);
   try {
