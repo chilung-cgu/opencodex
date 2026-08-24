@@ -7,6 +7,7 @@ export interface GenerationContext {
   comboTargets: ReadonlySet<string>;
   codexAccountIds: ReadonlySet<string>;
   oauthAccountKeys: ReadonlySet<string>;
+  providerAccountQuotaKeys: ReadonlySet<string>;
   configRoots: ReadonlySet<string>;
 }
 

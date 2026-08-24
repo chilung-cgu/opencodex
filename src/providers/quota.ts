@@ -1436,19 +1436,13 @@ type AccountQuotaCacheEntry = {
 const accountQuotaCache = new Map<string, AccountQuotaCacheEntry>();
 const accountQuotaInflight = new Map<string, Promise<AccountQuotaCacheEntry>>();
 let lastReconciledGeneration = 0;
-let liveAccountQuotaKeys = new Set<string>();
+let liveAccountQuotaKeys = new Map<string, number>();
 let liveProviderQuotaKeys = new Set<string>();
 
-function canonicalAccountQuotaKey(key: string): string {
-  const firstNull = key.indexOf("\0");
-  if (firstNull === -1) return key;
-  const secondNull = key.indexOf("\0", firstNull + 1);
-  if (secondNull === -1) return key;
-  return key.slice(0, secondNull);
-}
-
 function mayCommitAccountQuotaKey(key: string, writerGeneration: number): boolean {
-  return writerGeneration >= lastReconciledGeneration || liveAccountQuotaKeys.has(canonicalAccountQuotaKey(key));
+  const liveSinceGeneration = liveAccountQuotaKeys.get(key);
+  return writerGeneration >= lastReconciledGeneration
+    || (liveSinceGeneration !== undefined && writerGeneration >= liveSinceGeneration);
 }
 
 function mayCommitProviderQuotaKey(key: string, writerGeneration: number): boolean {
@@ -1481,12 +1475,34 @@ function accountCacheKey(provider: string, accountId: string, destination = ""):
   return destination ? provider + "\u0000" + accountId + "\u0000" + destination : provider + "\u0000" + accountId;
 }
 
+export function listLiveProviderAccountQuotaKeys(
+  providers: OcxConfig["providers"],
+  oauthAccountKeys: ReadonlySet<string>,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const canonical of oauthAccountKeys) {
+    const separator = canonical.indexOf("\0");
+    const provider = canonical.slice(0, separator);
+    const accountId = canonical.slice(separator + 1);
+    const destination = provider === "google-antigravity"
+      ? normalizeAntigravityDestination(providers[provider]?.baseUrl)
+      : "";
+    keys.add(accountCacheKey(provider, accountId, destination));
+  }
+  return keys;
+}
+
 /**
  * Synchronous last-good per-account quota read for routing. Never probes the network.
  * Returns null when nothing is cached (or the cached row has no bars).
  */
-export function getCachedProviderAccountQuota(provider: string, accountId: string): ProviderQuota | null {
-  const entry = accountQuotaCache.get(accountCacheKey(provider, accountId));
+export function getCachedProviderAccountQuota(
+  provider: string,
+  accountId: string,
+  baseUrl?: string,
+): ProviderQuota | null {
+  const destination = provider === "google-antigravity" ? normalizeAntigravityDestination(baseUrl) : "";
+  const entry = accountQuotaCache.get(accountCacheKey(provider, accountId, destination));
   return entry?.quota ?? null;
 }
 
@@ -1516,10 +1532,16 @@ export function sweepExpiredProviderAccountQuotaRows(now = Date.now()): number {
 
 export function reconcileProviderAccountQuotaRows(context: GenerationContext): number {
   if (context.generation <= lastReconciledGeneration) return 0;
+  const nextLiveAccountQuotaKeys = new Map<string, number>();
+  for (const key of context.providerAccountQuotaKeys) {
+    nextLiveAccountQuotaKeys.set(
+      key,
+      liveAccountQuotaKeys.get(key) ?? (lastReconciledGeneration === 0 ? 0 : context.generation),
+    );
+  }
   let removed = 0;
   for (const key of accountQuotaCache.keys()) {
-    const canonical = canonicalAccountQuotaKey(key);
-    if (context.oauthAccountKeys.has(canonical)) continue;
+    if (context.providerAccountQuotaKeys.has(key)) continue;
     accountQuotaCache.delete(key);
     removed += 1;
   }
@@ -1528,7 +1550,7 @@ export function reconcileProviderAccountQuotaRows(context: GenerationContext): n
     removed += cache.response.reports.length - reports.length;
     cache = { ...cache, response: { ...cache.response, reports } };
   }
-  liveAccountQuotaKeys = new Set(context.oauthAccountKeys);
+  liveAccountQuotaKeys = nextLiveAccountQuotaKeys;
   liveProviderQuotaKeys = new Set(context.providerNames);
   lastReconciledGeneration = context.generation;
   return removed;
@@ -1537,7 +1559,7 @@ export function reconcileProviderAccountQuotaRows(context: GenerationContext): n
 /** Test-only reset so a direct reconcile call in one file cannot leak across files. */
 export function resetProviderQuotaReconcileStateForTests(): void {
   lastReconciledGeneration = 0;
-  liveAccountQuotaKeys = new Set();
+  liveAccountQuotaKeys = new Map();
   liveProviderQuotaKeys = new Set();
 }
 

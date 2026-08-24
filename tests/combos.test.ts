@@ -809,6 +809,7 @@ describe("combo generation reconciliation", () => {
       comboTargets: new Set(["free::a/m1", "free::c/m3"]),
       codexAccountIds: new Set(),
       oauthAccountKeys: new Set(),
+      providerAccountQuotaKeys: new Set(),
       configRoots: new Set(),
     });
     expect(removed).toBeGreaterThan(0);
@@ -841,6 +842,7 @@ describe("combo generation reconciliation", () => {
       comboTargets: new Set(["free::a/m1", "free::c/m3"]),
       codexAccountIds: new Set(),
       oauthAccountKeys: new Set(),
+      providerAccountQuotaKeys: new Set(),
       configRoots: new Set(),
     });
 

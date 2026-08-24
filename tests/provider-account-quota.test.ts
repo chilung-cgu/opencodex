@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCredential } from "../src/oauth/store";
+import { PROXY_ENV_KEYS } from "../src/lib/proxy-env";
+import { reconcileStateGeneration, registerStateStore } from "../src/lib/state-store-sweeper";
 import type { OcxConfig } from "../src/types";
 import {
   clearAccountQuotaCache,
@@ -10,6 +12,7 @@ import {
   fetchProviderAccountQuotas,
   fetchProviderQuotaReports,
   getCachedProviderAccountQuota,
+  listLiveProviderAccountQuotaKeys,
   reconcileProviderAccountQuotaRows,
   resetProviderQuotaReconcileStateForTests,
   supportsPerAccountQuota,
@@ -17,6 +20,8 @@ import {
 
 const originalFetch = globalThis.fetch;
 const previousOpencodexHome = process.env.OPENCODEX_HOME;
+const proxyKeys = PROXY_ENV_KEYS.flatMap(key => [key, key.toLowerCase()]);
+const previousProxyEnv = Object.fromEntries(proxyKeys.map(key => [key, process.env[key]]));
 let opencodexHome: string;
 
 const FIRST = { accountId: "acct-first", email: "first@example.com" };
@@ -39,6 +44,7 @@ function usageBody(fiveHour: number, sevenDay: number): string {
 beforeEach(() => {
   opencodexHome = mkdtempSync(join(tmpdir(), "ocx-account-quota-"));
   process.env.OPENCODEX_HOME = opencodexHome;
+  for (const key of proxyKeys) delete process.env[key];
   clearAccountQuotaCache();
   clearProviderQuotaCache();
 });
@@ -47,6 +53,11 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   if (previousOpencodexHome === undefined) delete process.env.OPENCODEX_HOME;
   else process.env.OPENCODEX_HOME = previousOpencodexHome;
+  for (const key of proxyKeys) {
+    const previous = previousProxyEnv[key];
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
   rmSync(opencodexHome, { recursive: true, force: true });
   clearAccountQuotaCache();
   clearProviderQuotaCache();
@@ -411,6 +422,7 @@ describe("fetchProviderAccountQuotas", () => {
       comboTargets: new Set(),
       codexAccountIds: new Set(),
       oauthAccountKeys: new Set(),
+      providerAccountQuotaKeys: new Set(),
       configRoots: new Set(),
     });
     releaseUsage();
@@ -715,6 +727,114 @@ describe("fetchProviderAccountQuotas", () => {
     expect(rows1[0]!.quota?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(10);
   });
 
+  test("a pre-reconcile destination writer cannot repopulate cache after an A to B to A switch", async () => {
+    const { getAccountSet, saveCredential } = await import("../src/oauth/store");
+    await saveCredential("google-antigravity", {
+      access: "token-agy-aba",
+      refresh: "refresh-agy-aba",
+      expires: Date.now() + 3600_000,
+      projectId: "project-aba",
+      accountId: "acct-agy-aba",
+      email: "aba@example.com",
+    });
+
+    let releaseFirstA!: (value: Response) => void;
+    const firstAResponse = new Promise<Response>(resolve => { releaseFirstA = resolve; });
+    let markFirstAStarted!: () => void;
+    const firstAStarted = new Promise<void>(resolve => { markFirstAStarted = resolve; });
+    let aCalls = 0;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("dest-a.example.com")) {
+        aCalls += 1;
+        if (aCalls === 1) {
+          markFirstAStarted();
+          return firstAResponse;
+        }
+        return new Response(JSON.stringify({
+          models: {
+            "gemini-3.7-flash": { quotaInfo: { remainingFraction: 0.6, resetTime: "2026-07-05T14:00:00Z" } },
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        models: {
+          "gemini-3.7-flash": { quotaInfo: { remainingFraction: 0.5, resetTime: "2026-07-05T14:00:00Z" } },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    const accountId = getAccountSet("google-antigravity")!.accounts[0]!.id;
+    const context = {
+      generation: 0,
+      providerNames: new Set(["google-antigravity"]),
+      comboIds: new Set<string>(),
+      comboTargets: new Set<string>(),
+      codexAccountIds: new Set<string>(),
+      oauthAccountKeys: new Set([`google-antigravity\0${accountId}`]),
+      configRoots: new Set<string>(),
+    };
+    const destinationKeys = (baseUrl: string) => listLiveProviderAccountQuotaKeys({
+      "google-antigravity": { adapter: "google-antigravity", authMode: "oauth", baseUrl },
+    }, context.oauthAccountKeys);
+    const unregister = registerStateStore({
+      name: "provider-account-quota-aba-test",
+      reconcileGeneration: reconcileProviderAccountQuotaRows,
+    });
+    try {
+      reconcileStateGeneration({
+        ...context,
+        providerAccountQuotaKeys: destinationKeys("https://dest-a.example.com"),
+      });
+      const staleA = fetchProviderAccountQuotas("google-antigravity", true, "https://dest-a.example.com");
+      await firstAStarted;
+
+      reconcileStateGeneration({
+        ...context,
+        providerAccountQuotaKeys: destinationKeys("https://dest-b.example.com"),
+      });
+      const rowsB = await fetchProviderAccountQuotas("google-antigravity", true, "https://dest-b.example.com");
+      expect(rowsB[0]!.quota?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(50);
+      expect(getCachedProviderAccountQuota(
+        "google-antigravity",
+        accountId,
+        "https://dest-b.example.com",
+      )?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(50);
+      expect(getCachedProviderAccountQuota(
+        "google-antigravity",
+        accountId,
+        "https://dest-a.example.com",
+      )).toBeNull();
+      reconcileStateGeneration({
+        ...context,
+        providerAccountQuotaKeys: destinationKeys("https://dest-a.example.com"),
+      });
+
+      releaseFirstA(new Response(JSON.stringify({
+        models: {
+          "gemini-3.7-flash": { quotaInfo: { remainingFraction: 0.9, resetTime: "2026-07-05T14:00:00Z" } },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+      await staleA;
+      expect(getCachedProviderAccountQuota(
+        "google-antigravity",
+        accountId,
+        "https://dest-a.example.com",
+      )).toBeNull();
+
+      const currentA = await fetchProviderAccountQuotas("google-antigravity", false, "https://dest-a.example.com");
+      expect(aCalls).toBe(2);
+      expect(currentA[0]!.quota?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(40);
+      expect(getCachedProviderAccountQuota(
+        "google-antigravity",
+        accountId,
+        "https://dest-a.example.com",
+      )?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(40);
+    } finally {
+      unregister();
+    }
+  });
+
   test("fail-closed redirect handling: rejected destination or redirect yields null without following", async () => {
     const { fetchAntigravityUsageQuota } = await import("../src/providers/quota");
 
@@ -735,6 +855,68 @@ describe("fetchProviderAccountQuotas", () => {
     const quota = await fetchAntigravityUsageQuota("token", "project-1", "https://redirecting.example.com");
     expect(quota).toBeNull();
     expect(redirectTargetCalled).toBe(false);
+  });
+
+  test("Antigravity quota blocks private DNS answers and pins the bearer POST to the validated public address", async () => {
+    const { fetchAntigravityUsageQuota } = await import("../src/providers/quota");
+    const { providerOutboundPost } = await import("../src/lib/provider-outbound");
+
+    let privateResolveCalls = 0;
+    let privatePinnedCalls = 0;
+    const blocked = await fetchAntigravityUsageQuota(
+      "private-dns-token",
+      "private-dns-project",
+      "https://quota-private.example.com",
+      {
+        outboundPost: (name, provider, url, init) => providerOutboundPost(name, provider, url, init, {
+          resolveAddresses: async () => {
+            privateResolveCalls += 1;
+            throw new Error("provider URL hostname quota-private.example.com resolves to a private-network address (10.0.0.7)");
+          },
+          pinnedPost: async () => {
+            privatePinnedCalls += 1;
+            return new Response("unexpected", { status: 500 });
+          },
+        }),
+      },
+    );
+    expect(blocked).toBeNull();
+    expect(privateResolveCalls).toBe(1);
+    expect(privatePinnedCalls).toBe(0);
+
+    let pinnedAddress = "";
+    let pinnedAuthorization = "";
+    let pinnedBody = "";
+    const quota = await fetchAntigravityUsageQuota(
+      "public-dns-token",
+      "public-dns-project",
+      "https://quota-public.example.com",
+      {
+        outboundPost: (name, provider, url, init) => providerOutboundPost(name, provider, url, init, {
+          resolveAddresses: async () => ({
+            hostname: "quota-public.example.com",
+            addresses: [{ address: "93.184.216.34", family: 4 }],
+            privateNetwork: false,
+          }),
+          pinnedPost: async (_url, address, body, _signal, requestOptions) => {
+            pinnedAddress = address.address;
+            pinnedAuthorization = new Headers(requestOptions?.headers).get("authorization") ?? "";
+            pinnedBody = body;
+            return new Response(JSON.stringify({
+              models: {
+                "gemini-3.7-flash": {
+                  quotaInfo: { remainingFraction: 0.9, resetTime: "2026-07-05T14:00:00Z" },
+                },
+              },
+            }), { status: 200, headers: { "content-type": "application/json" } });
+          },
+        }),
+      },
+    );
+    expect(quota?.customWindows?.find(window => window.label === "Gem")?.percent).toBe(10);
+    expect(pinnedAddress).toBe("93.184.216.34");
+    expect(pinnedAuthorization).toBe("Bearer public-dns-token");
+    expect(JSON.parse(pinnedBody)).toEqual({ project: "public-dns-project" });
   });
 
   test("destination-qualified Antigravity cache rows survive generation reconcile when account remains live", async () => {
@@ -766,13 +948,22 @@ describe("fetchProviderAccountQuotas", () => {
     const set = getAccountSet("google-antigravity");
     expect(set?.accounts.length).toBe(1);
     const liveAccountId = set!.accounts[0]!.id;
+    const providers: OcxConfig["providers"] = {
+      "google-antigravity": {
+        adapter: "google-antigravity",
+        authMode: "oauth",
+        baseUrl: "https://custom-dest.example.com",
+      },
+    };
+    const oauthAccountKeys = new Set([`google-antigravity\0${liveAccountId}`]);
     reconcileProviderAccountQuotaRows({
       generation: 50_000,
       providerNames: new Set(["google-antigravity"]),
       comboIds: new Set(),
       comboTargets: new Set(),
       codexAccountIds: new Set(),
-      oauthAccountKeys: new Set([`google-antigravity\0${liveAccountId}`]),
+      oauthAccountKeys,
+      providerAccountQuotaKeys: listLiveProviderAccountQuotaKeys(providers, oauthAccountKeys),
       configRoots: new Set(),
     });
 

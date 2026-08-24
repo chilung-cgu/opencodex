@@ -37,7 +37,7 @@ import { sweepExpiredApiKeyCooldowns } from "../providers/key-failover";
 import { reconcileProviderRequestPacing } from "../providers/request-pacing";
 import { sweepAbandonedResponseStateTemps, sweepExpiredResponseStates } from "../responses/state";
 import { sweepExpiredAntigravityReplay } from "../adapters/google-antigravity-replay";
-import { reconcileProviderAccountQuotaRows } from "../providers/quota";
+import { listLiveProviderAccountQuotaKeys, reconcileProviderAccountQuotaRows } from "../providers/quota";
 import { reconcileRouterWarningMemos } from "../router";
 import type { OcxConfig } from "../types";
 import {
@@ -62,13 +62,15 @@ export function reconcileLiveStateStores() {
 export function buildGenerationContext(): GenerationContext {
   if (!liveServerConfig) throw new Error("live server config is not installed");
   const providerNames = new Set(Object.keys(liveServerConfig.providers));
+  const oauthAccountKeys = listLiveOAuthAccountKeys(providerNames);
   return {
     generation: 0,
     providerNames,
     comboIds: new Set(Object.keys(liveServerConfig.combos ?? {})),
     comboTargets: listLiveComboTargetKeys(liveServerConfig),
     codexAccountIds: listLiveCodexAccountIds(liveServerConfig),
-    oauthAccountKeys: listLiveOAuthAccountKeys(providerNames),
+    oauthAccountKeys,
+    providerAccountQuotaKeys: listLiveProviderAccountQuotaKeys(liveServerConfig.providers, oauthAccountKeys),
     configRoots: listLiveConfigOwnershipRoots(getConfigDir()),
   };
 }

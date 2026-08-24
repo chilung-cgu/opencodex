@@ -327,6 +327,7 @@ describe("multi-account auth store", () => {
       comboTargets: new Set(),
       codexAccountIds: new Set(),
       oauthAccountKeys: new Set(),
+      providerAccountQuotaKeys: new Set(),
       configRoots: new Set(),
     });
     release();

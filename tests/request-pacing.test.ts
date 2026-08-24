@@ -220,6 +220,7 @@ describe("provider request pacing queue", () => {
       comboTargets: new Set(),
       codexAccountIds: new Set(),
       oauthAccountKeys: new Set(),
+      providerAccountQuotaKeys: new Set(),
       configRoots: new Set(),
     })).toBe(1);
 

@@ -59,6 +59,7 @@ function context(
     comboTargets: new Set(),
     codexAccountIds: new Set(),
     oauthAccountKeys: new Set(),
+    providerAccountQuotaKeys: new Set(),
     configRoots: new Set(),
     ...overrides,
   };
