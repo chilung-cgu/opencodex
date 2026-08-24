@@ -3063,10 +3063,15 @@ export function providerModelResponsesUpstreamStreaming(
 const DEFAULT_TERMINAL_REPAIR_GRACE_MS = 500;
 const MAX_TERMINAL_REPAIR_GRACE_MS = 60_000;
 
-function lookupCaseInsensitive<T>(map: Record<string, T> | undefined, key: string): T | undefined {
-  if (!map) return undefined;
+type CaseInsensitiveLookup<T> =
+  | { kind: "missing" }
+  | { kind: "ambiguous" }
+  | { kind: "value"; value: T };
+
+function lookupCaseInsensitive<T>(map: Record<string, T> | undefined, key: string): CaseInsensitiveLookup<T> {
+  if (!map) return { kind: "missing" };
   const target = key.trim().toLowerCase();
-  if (!target) return undefined;
+  if (!target) return { kind: "missing" };
   let matchedValue: T | undefined = undefined;
   let matchCount = 0;
   for (const [k, v] of Object.entries(map)) {
@@ -3076,8 +3081,10 @@ function lookupCaseInsensitive<T>(map: Record<string, T> | undefined, key: strin
     }
   }
   // If multiple keys case-fold to the same target (e.g. "My-Model" and "my-model"), reject as ambiguous
-  if (matchCount > 1) return undefined;
-  return matchedValue;
+  if (matchCount > 1) return { kind: "ambiguous" };
+  return matchCount === 1 && matchedValue !== undefined
+    ? { kind: "value", value: matchedValue }
+    : { kind: "missing" };
 }
 
 /**
@@ -3095,16 +3102,21 @@ export function providerModelResponsesTerminalRepair(
   }
 
   const modelKey = modelId.trim().toLowerCase();
-  const effectiveAdapter = lookupCaseInsensitive(provider.modelAdapters, modelId) ?? provider.adapter;
+  // Match resolveWireProtocolOverride: explicit modelAdapters entries are exact-keyed. The
+  // compatibility/repair maps are intentionally case-insensitive, but folding this map here
+  // would make the policy disagree with the adapter selected for the actual request.
+  const effectiveAdapter = provider.modelAdapters?.[modelId] ?? provider.adapter;
 
   // Custom provider opt-in: effective wire must be openai-responses
   if (effectiveAdapter === "openai-responses") {
     // 1. Check explicit modelResponsesCompatibility
     const compat = lookupCaseInsensitive(provider.modelResponsesCompatibility, modelId);
-    if (compat === "terminal-repair") {
+    if (compat.kind === "ambiguous") return undefined;
+    if (compat.kind === "value" && compat.value === "terminal-repair") {
       const raw = lookupCaseInsensitive(provider.modelResponsesTerminalRepair, modelId);
-      if (raw !== undefined) {
-        const grace = typeof raw === "number" ? raw : (typeof raw === "object" && raw && "graceMs" in raw ? (raw as { graceMs?: unknown }).graceMs : undefined);
+      if (raw.kind === "ambiguous") return undefined;
+      if (raw.kind === "value") {
+        const grace = typeof raw.value === "number" ? raw.value : (typeof raw.value === "object" && raw.value && "graceMs" in raw.value ? (raw.value as { graceMs?: unknown }).graceMs : undefined);
         const graceMs = Math.floor(typeof grace === "number" ? grace : 0);
         if (!Number.isFinite(graceMs) || graceMs <= 0) return undefined;
         return { graceMs: Math.min(graceMs, MAX_TERMINAL_REPAIR_GRACE_MS) };
@@ -3114,8 +3126,9 @@ export function providerModelResponsesTerminalRepair(
 
     // 2. Check explicit modelResponsesTerminalRepair
     const rawModel = lookupCaseInsensitive(provider.modelResponsesTerminalRepair, modelId);
-    if (rawModel !== undefined) {
-      const grace = typeof rawModel === "number" ? rawModel : (typeof rawModel === "object" && rawModel && "graceMs" in rawModel ? (rawModel as { graceMs?: unknown }).graceMs : undefined);
+    if (rawModel.kind === "ambiguous") return undefined;
+    if (rawModel.kind === "value") {
+      const grace = typeof rawModel.value === "number" ? rawModel.value : (typeof rawModel.value === "object" && rawModel.value && "graceMs" in rawModel.value ? (rawModel.value as { graceMs?: unknown }).graceMs : undefined);
       const graceMs = Math.floor(typeof grace === "number" ? grace : 0);
       if (Number.isFinite(graceMs) && graceMs > 0) {
         return { graceMs: Math.min(graceMs, MAX_TERMINAL_REPAIR_GRACE_MS) };

@@ -1179,6 +1179,42 @@ describe("stateless Responses upstreams get no stateful parameters", () => {
       expect(providerModelResponsesTerminalRepair("custom-gateway", conflictProv, "MY-MODEL")).toBeUndefined();
     });
 
+    test("ambiguous explicit values do not fall back to a provider-level grace", () => {
+      const conflictProv = {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        responsesTerminalRepair: 750,
+        modelResponsesTerminalRepair: {
+          "My-Model": 500,
+          "my-model": 1500,
+        },
+      };
+      expect(providerModelResponsesTerminalRepair("custom-gateway", conflictProv, "MY-MODEL")).toBeUndefined();
+
+      const compatibilityConflict = {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        responsesTerminalRepair: 750,
+        modelResponsesCompatibility: {
+          "My-Model": "terminal-repair" as const,
+          "my-model": "terminal-repair" as const,
+        },
+      };
+      expect(providerModelResponsesTerminalRepair("custom-gateway", compatibilityConflict, "MY-MODEL")).toBeUndefined();
+    });
+
+    test("matches modelAdapters with the exact wire resolver key semantics", () => {
+      const provider = {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        modelAdapters: { "My-Model": "openai-chat" },
+        modelResponsesTerminalRepair: { "my-model": 1500 },
+      };
+      // resolveWireProtocolOverride does not match the differently-cased key, so the
+      // effective wire remains openai-responses and terminal repair is applicable.
+      expect(providerModelResponsesTerminalRepair("custom-gateway", provider, "my-model")).toEqual({ graceMs: 1500 });
+    });
+
     test("clamps grace period to maximum 60,000 ms", () => {
       const hugeProv = {
         adapter: "openai-responses",
