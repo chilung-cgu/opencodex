@@ -190,7 +190,7 @@ describe("day-level estimated cost", () => {
   test.each([
     [0, 0],
     [150, 1],
-  ])("the day overflow row preserves cache observation and clamps cache hit rate (%d reads)", (cacheRead, expected) => {
+  ])("overflow rows preserve cache reads and clamp cache hit rate (%d reads)", (cacheRead, expected) => {
     const total = MAX_USAGE_MODEL_BREAKDOWN_ROWS + 1;
     const entries = Array.from({ length: total }, (_, i) => entry({
       ts: at + i,
@@ -206,7 +206,19 @@ describe("day-level estimated cost", () => {
     const sum = summarizeUsage(entries, "30d", at + total);
     const day = sum.days.find(d => d.requests === total);
     const other = day?.models.find(model => model.model === "other");
+    expect(other?.cacheReadInputTokens).toBe(cacheRead);
     expect(other?.cacheHitRate).toBe(expected);
+    expect(other).not.toHaveProperty("cacheObserved");
+
+    const modelOther = sum.models.find(model => model.model === "other");
+    expect(modelOther?.cacheReadInputTokens).toBe(cacheRead);
+    expect(modelOther?.cacheHitRate).toBe(expected);
+    expect(modelOther).not.toHaveProperty("cacheObserved");
+
+    const provider = sum.providers.find(row => row.provider === "openai");
+    expect(provider?.cacheReadInputTokens).toBe(cacheRead);
+    expect(provider?.cacheHitRate).toBeCloseTo(cacheRead / (total + 99));
+    expect(provider).not.toHaveProperty("cacheObserved");
   });
 });
 
@@ -1334,6 +1346,7 @@ describe("summarizeUsage", () => {
     expect(sonnet?.cacheReadInputTokens).toBe(600);
     expect(sonnet?.cacheCreationInputTokens).toBe(300);
     expect(sonnet?.cacheHitRate).toBeCloseTo(600 / 1500);
+    expect(sonnet).not.toHaveProperty("cacheObserved");
 
     const unpricedModel = summary.models.find(m => m.model === "unpriced-model");
     expect(unpricedModel).toBeDefined();
@@ -1348,6 +1361,7 @@ describe("summarizeUsage", () => {
     expect(anthropicProv?.cacheReadInputTokens).toBe(600);
     expect(anthropicProv?.cacheCreationInputTokens).toBe(300);
     expect(anthropicProv?.cacheHitRate).toBeCloseTo(600 / 1500);
+    expect(anthropicProv).not.toHaveProperty("cacheObserved");
 
     // Day model assertions
     const day = summary.days.find(d => d.models.some(m => m.model === "claude-sonnet-5"));
@@ -1359,6 +1373,7 @@ describe("summarizeUsage", () => {
     expect(daySonnet?.cacheCreationInputTokens).toBe(300);
     expect(daySonnet?.cacheHitRate).toBeCloseTo(600 / 1500);
     expect(daySonnet?.estimatedCostUsd).toBeGreaterThan(0);
+    expect(daySonnet).not.toHaveProperty("cacheObserved");
 
     const dayUnpriced = summary.days
       .flatMap(d => d.models)

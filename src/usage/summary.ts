@@ -604,7 +604,7 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
         m.cacheHitRate = calculateCacheHitRate(!!m.cacheObserved, m.inputTokens ?? 0, m.cacheReadInputTokens ?? 0);
       }
       const sorted = [...models.values()].sort((a, b) => b.requests - a.requests);
-      day.models = retainedBreakdownRows(sorted, overflow => {
+      const retained = retainedBreakdownRows(sorted, overflow => {
         const requests = new Set<string>();
         let attemptCount = 0;
         let totalTokens = 0;
@@ -643,6 +643,8 @@ function buildDayGrid(range: UsageRange, since: number | null, now: number, entr
           ...(estimatedCostUsd !== undefined ? { estimatedCostUsd } : {}),
         };
       });
+      for (const model of retained) delete model.cacheObserved;
+      day.models = retained;
     }
   }
   return out;
@@ -771,7 +773,7 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number, costMa
     m.priceCoverageRatio = m.requests > 0 ? m.pricedRequests / m.requests : 0;
   }
   const sorted = models.sort((a, b) => b.requests - a.requests);
-  return retainedBreakdownRows(sorted, overflow => {
+  const retained = retainedBreakdownRows(sorted, overflow => {
     const statusesByRequest = new Map<string, UsageStatus[]>();
     const overflowPricedRequests = new Set<string>();
     const overflowUnpricedRequests = new Set<string>();
@@ -830,6 +832,8 @@ function buildModels(entries: PersistedUsageEntry[], totalTokens: number, costMa
     other.priceCoverageRatio = other.requests > 0 ? other.pricedRequests / other.requests : 0;
     return other;
   });
+  for (const model of retained) delete model.cacheObserved;
+  return retained;
 }
 
 function buildProviders(entries: PersistedUsageEntry[], totalTokens: number, costMap: Map<PersistedUsageEntry, EntryCostInfo>): UsageProvider[] {
@@ -945,7 +949,9 @@ function buildProviders(entries: PersistedUsageEntry[], totalTokens: number, cos
     p.cacheHitRate = calculateCacheHitRate(!!p.cacheObserved, p.inputTokens ?? 0, p.cacheReadInputTokens ?? 0);
     p.priceCoverageRatio = p.requests > 0 ? p.pricedRequests / p.requests : 0;
   }
-  return providers.sort((a, b) => b.requests - a.requests);
+  const sorted = providers.sort((a, b) => b.requests - a.requests);
+  for (const provider of sorted) delete provider.cacheObserved;
+  return sorted;
 }
 
 const LEGACY_AMBIGUOUS_ACCOUNT_LABEL = "legacy-ambiguous";
