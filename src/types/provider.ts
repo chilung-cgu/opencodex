@@ -309,9 +309,9 @@ export interface OcxProviderConfig {
     fallback?: "preset-empty";
   };
   /**
-   * Models that should be retained in the catalog when configured in `models` even if live discovery omits them.
-   * Applies to configured model IDs processed by `mergeConfiguredModelsIntoLiveCatalog`, and does not
-   * independently seed catalog entries for IDs listed only in `retainModels`.
+   * Model IDs to retain in the authoritative live catalog even when upstream discovery omits them.
+   * IDs listed here are independently seeded as configured entries and kept through
+   * `mergeConfiguredModelsIntoLiveCatalog`; they do not need to also appear in `models`.
    * Useful when an upstream account has unlisted or upcoming models (e.g. unprovisioned
    * Antigravity models or regional previews).
    */
