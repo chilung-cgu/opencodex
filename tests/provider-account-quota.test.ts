@@ -487,14 +487,15 @@ describe("fetchProviderAccountQuotas", () => {
     expect(seenAuthorizationByProject.get("project-1")).toBe("Bearer token-agy-1");
     expect(seenAuthorizationByProject.get("project-2")).toBe("Bearer token-agy-2");
 
-    const byProject = Object.fromEntries(rows.map(r => [
-      r.quota?.customWindows?.find(w => w.label === "Gem")?.percent,
-      r.quota?.customWindows?.find(w => w.label === "Cla")?.percent,
-    ]));
-    // 1 - 0.64 = 36% used, 1 - 0.21 = 79% used for project 1
-    // 1 - 0.90 = 10% used, 1 - 0.85 = 15% used for project 2
-    expect(byProject[36]).toBe(79);
-    expect(byProject[10]).toBe(15);
+    const window = (accountId: string, label: string) => rows
+      .find(r => r.accountId === accountId)
+      ?.quota?.customWindows?.find(w => w.label === label)?.percent;
+    const { getAccountSet } = await import("../src/oauth/store");
+    const ids = getAccountSet("google-antigravity")!.accounts.map(a => a.id);
+    // 1 - 0.64 = 36% used, 1 - 0.21 = 79% used for account 1
+    // 1 - 0.90 = 10% used, 1 - 0.85 = 15% used for account 2
+    expect([window(ids[0]!, "Gem"), window(ids[0]!, "Cla")]).toEqual([36, 79]);
+    expect([window(ids[1]!, "Gem"), window(ids[1]!, "Cla")]).toEqual([10, 15]);
   });
 
   test("uses the configured provider baseUrl for Antigravity account quota probes", async () => {
@@ -969,5 +970,34 @@ describe("fetchProviderAccountQuotas", () => {
     expect(rows2.length).toBe(1);
     expect(probeCount).toBe(1);
     expect(rows2[0]!.quota?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(20);
+  });
+
+  test("forwards allowPrivateNetwork through account quota probing", async () => {
+    const { saveCredential } = await import("../src/oauth/store");
+    await saveCredential("google-antigravity", {
+      access: "token-agy-priv",
+      refresh: "refresh-agy-priv",
+      expires: Date.now() + 3600_000,
+      projectId: "project-priv",
+      accountId: "acct-agy-priv",
+      email: "priv@example.com",
+    });
+
+    let requestedUrl = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({
+        models: {
+          "gemini-3.7-flash": {
+            quotaInfo: { remainingFraction: 0.50, resetTime: "2026-07-05T14:00:00Z" },
+          },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    const rows = await fetchProviderAccountQuotas("google-antigravity", true, "https://127.0.0.1:8443", true);
+    expect(rows.length).toBe(1);
+    expect(requestedUrl).toBe("https://127.0.0.1:8443/v1internal:fetchAvailableModels");
+    expect(rows[0]?.quota?.customWindows?.find(w => w.label === "Gem")?.percent).toBe(50);
   });
 });

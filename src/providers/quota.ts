@@ -1,7 +1,7 @@
+const originalFetch = globalThis.fetch;
 import { providerDestinationConfigError } from "../lib/destination-policy";
 import { providerOutboundPost, providerRedirectError } from "../lib/provider-outbound";
 
-const originalFetch = globalThis.fetch;
 import { createHash } from "node:crypto";
 import {
   effectiveCodexAuthAccountId,
@@ -1605,8 +1605,9 @@ async function getTokenForAccountQuotaProbe(provider: string, accountId: string)
 async function fetchAccountQuota(
   provider: string,
   accountId: string,
-  forceRefresh: boolean,
+  forceRefresh = false,
   baseUrl?: string,
+  allowPrivateNetwork?: boolean,
 ): Promise<AccountQuotaCacheEntry> {
   const normalizedDest = provider === "google-antigravity" ? normalizeAntigravityDestination(baseUrl) : "";
   const key = accountCacheKey(provider, accountId, normalizedDest);
@@ -1638,6 +1639,7 @@ async function fetchAccountQuota(
         // Pre-flight destination policy gate before acquiring or refreshing account token
         const destError = providerDestinationConfigError("google-antigravity", {
           baseUrl: baseUrl || "https://daily-cloudcode-pa.googleapis.com",
+          allowPrivateNetwork: allowPrivateNetwork ?? false,
         });
         if (destError) {
           const entry: AccountQuotaCacheEntry = { ts: Date.now(), quota: null, unavailable: true };
@@ -1648,7 +1650,7 @@ async function fetchAccountQuota(
           return entry;
         }
         const token = await getTokenForAccountQuotaProbe(provider, accountId);
-        quota = await fetchAntigravityUsageQuota(token, stored.projectId, baseUrl);
+        quota = await fetchAntigravityUsageQuota(token, stored.projectId, baseUrl, { allowPrivateNetwork });
       }
       if (!quota) {
         // Preserve last-good bars and mark unavailable; advance TTL so failures
@@ -1697,12 +1699,13 @@ export async function fetchProviderAccountQuotas(
   provider: string,
   forceRefresh = false,
   baseUrl?: string,
+  allowPrivateNetwork?: boolean,
 ): Promise<ProviderAccountQuota[]> {
   if (!supportsPerAccountQuota(provider)) return [];
   const set = getAccountSet(provider);
   if (!set) return [];
   return await Promise.all(set.accounts.map(async account => {
-    const entry = await fetchAccountQuota(provider, account.id, forceRefresh, baseUrl);
+    const entry = await fetchAccountQuota(provider, account.id, forceRefresh, baseUrl, allowPrivateNetwork);
     return {
       accountId: account.id,
       quota: entry.quota,
@@ -2291,7 +2294,7 @@ async function fetchAntigravityQuota(provider: string, config: OcxProviderConfig
   } catch {
     return null;
   }
-  const quota = await fetchAntigravityUsageQuota(accessToken, credential.projectId, config.baseUrl);
+  const quota = await fetchAntigravityUsageQuota(accessToken, credential.projectId, config.baseUrl, { allowPrivateNetwork: config.allowPrivateNetwork });
   if (!quota) return null;
   if (probedAccountId && probedAccountKey) {
     const stillOwnsToken = getAccountCredential("google-antigravity", probedAccountId)?.access === accessToken;
