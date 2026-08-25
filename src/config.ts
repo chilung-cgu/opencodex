@@ -790,7 +790,13 @@ export function modelResponsesCompatibilityConfigError(
   if (entries.length > 0 && provider && isCanonicalOpenAiForwardProvider(provider as OcxProviderConfig)) {
     return `${field} is not supported on the canonical ChatGPT forward provider`;
   }
+  const seen = new Set<string>();
   for (const [key, entry] of entries) {
+    const lower = key.toLowerCase();
+    if (seen.has(lower)) {
+      return `${field} contains duplicate case-insensitive model id "${key}"`;
+    }
+    seen.add(lower);
     if (!key.trim() || key !== key.trim()) return `${field} keys must be nonblank trimmed model ids`;
     if (entry !== "terminal-repair") {
       return `${field}.${key} must be "terminal-repair"`;
@@ -813,10 +819,16 @@ export function modelResponsesTerminalRepairConfigError(
   if (entries.length > 0 && provider && isCanonicalOpenAiForwardProvider(provider as OcxProviderConfig)) {
     return `${field} is not supported on the canonical ChatGPT forward provider`;
   }
+  const seen = new Set<string>();
   for (const [key, entry] of entries) {
+    const lower = key.toLowerCase();
+    if (seen.has(lower)) {
+      return `${field} contains duplicate case-insensitive model id "${key}"`;
+    }
+    seen.add(lower);
     if (!key.trim() || key !== key.trim()) return `${field} keys must be nonblank trimmed model ids`;
     const grace = typeof entry === "number" ? entry : (typeof entry === "object" && entry ? (entry as { graceMs?: unknown }).graceMs : null);
-    if (typeof grace !== "number" || !Number.isFinite(grace) || grace <= 0) {
+    if (typeof grace !== "number" || !Number.isFinite(grace) || Math.floor(grace) <= 0) {
       return `${field}.${key} must be a positive number of milliseconds or { graceMs: number }`;
     }
   }
@@ -835,7 +847,7 @@ export function responsesTerminalRepairConfigError(
   }
   if (value === "terminal-repair") return null;
   const grace = typeof value === "number" ? value : (typeof value === "object" && value ? (value as { graceMs?: unknown }).graceMs : null);
-  if (typeof grace !== "number" || !Number.isFinite(grace) || grace <= 0) {
+  if (typeof grace !== "number" || !Number.isFinite(grace) || Math.floor(grace) <= 0) {
     return `${field} must be "terminal-repair", a positive number of milliseconds, or { graceMs: number }`;
   }
   return null;

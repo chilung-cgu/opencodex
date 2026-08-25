@@ -209,7 +209,7 @@ Resolution uses this precedence:
 
 Grace values are positive finite milliseconds, and the runtime floors them and caps any result at
 60 seconds. Config validation rejects malformed values and rejects all three keys on the canonical
-ChatGPT forward provider. The runtime resolver is defense in depth: an invalid or ambiguous
+ChatGPT forward provider (matching by adapter, authMode, and normalized baseUrl configuration, not provider name). The runtime resolver is defense in depth: an invalid or ambiguous
 case-folded per-model entry is not selected, so resolution fails closed instead of choosing an
 arbitrary entry.
 

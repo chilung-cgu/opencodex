@@ -1278,6 +1278,95 @@ describe("stateless Responses upstreams get no stateful parameters", () => {
         .toContain("modelResponsesCompatibility is not supported on the canonical ChatGPT forward provider");
       expect(modelResponsesTerminalRepairConfigError({ "gpt-5": 500 }, "modelResponsesTerminalRepair", "openai", canonicalOpenAi))
         .toContain("modelResponsesTerminalRepair is not supported on the canonical ChatGPT forward provider");
+
+      // Reject duplicate case-folded keys
+      expect(providerManagementConfigError("custom-gw", {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        modelResponsesCompatibility: { "My-Model": "terminal-repair", "my-model": "terminal-repair" },
+      })).toContain('modelResponsesCompatibility contains duplicate case-insensitive model id "my-model"');
+
+      expect(providerManagementConfigError("custom-gw", {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        modelResponsesTerminalRepair: { "My-Model": 1500, "my-model": 2000 },
+      })).toContain('modelResponsesTerminalRepair contains duplicate case-insensitive model id "my-model"');
+
+      // Reject fractional grace flooring to zero
+      expect(providerManagementConfigError("custom-gw", {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        responsesTerminalRepair: 0.5,
+      })).toContain('responsesTerminalRepair must be "terminal-repair", a positive number');
+
+      expect(providerManagementConfigError("custom-gw", {
+        adapter: "openai-responses",
+        baseUrl: "https://custom-gateway.test/v1",
+        modelResponsesTerminalRepair: { "my-model": 0.5 },
+      })).toContain('modelResponsesTerminalRepair.my-model must be a positive number');
+    });
+
+    test("handleResponses executes terminal repair on custom openai-responses provider", async () => {
+      const source = controlledSse();
+      const scheduler = new ManualTerminalScheduler();
+      const testAbort = new AbortController();
+
+      globalThis.fetch = (async () => {
+        return new Response(source.stream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }) as typeof fetch;
+
+      const config = {
+        providers: {
+          "custom-gw": {
+            adapter: "openai-responses",
+            baseUrl: "https://custom-gateway.test/v1",
+            responsesTerminalRepair: 500,
+          },
+        },
+      } as unknown as OcxConfig;
+
+      const response = await handleResponses(
+        new Request("http://localhost/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "custom-gw/custom-model", input: "hello", stream: true }),
+        }),
+        config,
+        { model: "", provider: "" },
+        {
+          abortSignal: testAbort.signal,
+          responsesTerminalRepairScheduler: scheduler,
+        } as Parameters<typeof handleResponses>[3],
+      );
+
+      const reader = response.body!.getReader();
+      try {
+        source.push([
+          sse({ type: "response.created", response: { id: "resp_custom", status: "in_progress", output: [] }, sequence_number: 0 }),
+          sse({ type: "response.output_item.added", item: { type: "message", id: "msg_custom", role: "assistant", status: "in_progress", content: [] }, output_index: 0, sequence_number: 1 }),
+          sse({ type: "response.output_item.done", item: { type: "message", id: "msg_custom", role: "assistant", status: "completed", content: [{ type: "output_text", text: "hi" }] }, output_index: 0, sequence_number: 2 }),
+        ].join(""));
+
+        const first = await readUntil(reader, "response.output_item.done");
+        expect(first).toContain("response.output_item.done");
+
+        for (let attempts = 0; attempts < 20 && scheduler.pending() === 0; attempts += 1) {
+          await Bun.sleep(0);
+        }
+        expect(scheduler.pending()).toBe(1);
+        scheduler.advance(500);
+
+        const tail = await readUntil(reader, "response.completed");
+        expect(tail).toContain("response.completed");
+        expect(tail).toContain("resp_custom");
+      } finally {
+        testAbort.abort();
+        source.cancel();
+        await reader.cancel().catch(() => {});
+      }
     });
   });
 });
