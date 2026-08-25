@@ -522,11 +522,11 @@ eligible provider after the ordered list. `only` is always an allowlist.
 
 ## Vercel AI Gateway provider routing
 
-Vercel AI Gateway can route a model across multiple underlying inference providers. `vercelGatewayRouting` configures provider-wide preferences; `modelVercelGatewayRouting` replaces it for exact model IDs.
+Vercel AI Gateway can route a model across multiple underlying inference providers. `vercelGatewayRouting` configures provider-wide preferences; `modelVercelGatewayRouting` replaces it for exact model IDs. Leaving both unset makes `resolveVercelGatewayRouting()` return `undefined`, so Chat request builders omit the `provider` field and Vercel AI Gateway retains its default dynamic routing behavior.
 
-- `order`: provider slugs in priority order.
-- `only`: explicit allowlist restricting eligible providers.
-- `sort`: automatically sort eligible providers by `"cost"`, `"ttft"`, or `"tps"`.
+- `order`: Vercel AI Gateway upstream provider slugs in priority order.
+- `only`: explicit allowlist restricting eligible Vercel AI Gateway upstream providers.
+- `sort`: automatically sort eligible providers by `"cost"` (lowest cost), `"ttft"` (time to first token), or `"tps"` (tokens per second).
 
 ```json
 {
