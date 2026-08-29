@@ -398,6 +398,18 @@ describe("Codex app-server process matching (#476)", () => {
   });
 
 
+  test("matches codex.opencodex-real launcher backup binaries and wrappers", () => {
+    expect(isCodexAppServerCommandLine("/home/ubuntu/.local/bin/codex.opencodex-real app-server proxy")).toBe(true);
+    expect(isCodexAppServerCommandLine(
+      "/home/ubuntu/.local/bin/codex.opencodex-real -c features.code_mode_host=true app-server --listen unix://",
+    )).toBe(true);
+    expect(isCodexAppServerCommandLine("C:\\Users\\a\\AppData\\codex.opencodex-real.exe app-server --listen pipe")).toBe(true);
+    expect(isCodexAppServerCommandLine("\"C:\\Program Files\\nodejs\\codex.opencodex-real.cmd\" app-server")).toBe(true);
+    expect(isCodexAppServerCommandLine("node /usr/local/bin/codex.opencodex-real app-server proxy")).toBe(true);
+    expect(isCodexAppServerCommandLine("codex.opencodex-real exec 'hello'")).toBe(false);
+    expect(isCodexAppServerCommandLine("node worker.js codex.opencodex-real app-server")).toBe(false);
+  });
+
   test("matches the npm wrapper that supervises the native app-server", () => {
     // The shape that made `ocx sync --restart-codex` report a survivor on Linux. An
     // npm-installed Codex runs as a PAIR: `node /usr/local/bin/codex app-server` and
@@ -491,6 +503,12 @@ describe("Codex app-server process matching (#476)", () => {
     )).toBe(true);
     expect(isWindowsCodexCandidateCommandLine(
       "C:\\Users\\a\\.codex\\bin\\codex-aarch64-pc-windows-msvc.exe app-server",
+    )).toBe(true);
+    expect(isWindowsCodexCandidateCommandLine(
+      "C:\\Users\\a\\.local\\bin\\codex.opencodex-real.exe app-server",
+    )).toBe(true);
+    expect(isWindowsCodexCandidateCommandLine(
+      "\"C:\\Program Files\\Codex\\codex.opencodex-real.cmd\" app-server",
     )).toBe(true);
     // Stay narrow: incidental "opencodex" paths must not pay GetOwner.
     expect(isWindowsCodexCandidateCommandLine(

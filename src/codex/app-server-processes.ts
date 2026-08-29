@@ -46,7 +46,7 @@ const CODEX_TARGET_TRIPLE_BODY = "[a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+(?:-[a-z0-9_]+
  * `codex-x86_64-pc-windows-msvc.exe`.
  */
 export const WINDOWS_CODEX_BASENAME_CANDIDATE_RE = new RegExp(
-  `(^|[/\\\\\\s'"=])codex(-${CODEX_TARGET_TRIPLE_BODY})?([.]exe|[.]cmd)?['"]?(\\s|$)`,
+  `(^|[/\\\\\\s'"=])codex([.]opencodex-real)?(-${CODEX_TARGET_TRIPLE_BODY})?([.]exe|[.]cmd)?['"]?(\\s|$)`,
   "i",
 );
 
@@ -159,6 +159,8 @@ function tokenBasename(token: string): string {
 function isCodexExecutableToken(token: string): boolean {
   const base = tokenBasename(token);
   return base === "codex" || base === "codex.exe" || base === "codex.cmd"
+    || base === "codex.opencodex-real" || base === "codex.opencodex-real.exe"
+    || base === "codex.opencodex-real.cmd"
     || CODEX_TARGET_TRIPLE_BASENAME_RE.test(base);
 }
 
