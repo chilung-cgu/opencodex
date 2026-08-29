@@ -9,7 +9,7 @@ reports zero app-server processes stopped, leaving long-lived app-servers holdin
 
 `ps -ef` on the affected host:
 
-```
+```text
 ubuntu  3600609  1  0 04:35 ?  /home/ubuntu/.local/bin/codex.opencodex-real -c features.code_mode_host=true app-server --listen unix://
 ```
 
