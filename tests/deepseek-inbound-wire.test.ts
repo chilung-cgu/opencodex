@@ -1485,13 +1485,16 @@ describe("stateless Responses upstreams get no stateful parameters", () => {
           sse({ type: "response.created", response: { id: "resp_passthrough", status: "in_progress", output: [] }, sequence_number: 0 }),
           sse({ type: "response.output_item.added", item: { type: "message", id: "msg_pt", role: "assistant", status: "in_progress", content: [] }, output_index: 0, sequence_number: 1 }),
           sse({ type: "response.output_item.done", item: { type: "message", id: "msg_pt", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }] }, output_index: 0, sequence_number: 2 }),
-          sse({ type: "response.completed", response: { id: "resp_passthrough", status: "completed", output: [{ type: "message", id: "msg_pt", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }] }] }, sequence_number: 3 }),
+          sse({ type: "response.completed", response: { id: "resp_passthrough", status: "completed", output: [{ type: "message", id: "msg_pt", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }] }], usage: { input_tokens: 7, output_tokens: 3, total_tokens: 10 } }, sequence_number: 3 }),
         ].join(""));
 
         const full = await readUntil(reader, "response.completed");
         expect(full).toContain("response.completed");
         expect(full).toContain("resp_passthrough");
-        // When a real terminal arrives, the scheduler should NOT have fired
+        expect(full).toContain('"input_tokens":7');
+        source.cancel();
+        const tail = await drainReader(reader);
+        expect((full + tail).match(/"type":"response\.completed"/g)).toHaveLength(1);
         expect(scheduler.pending()).toBe(0);
       } finally {
         testAbort.abort();
