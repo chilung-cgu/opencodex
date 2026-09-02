@@ -1368,5 +1368,136 @@ describe("stateless Responses upstreams get no stateful parameters", () => {
         await reader.cancel().catch(() => {});
       }
     });
+    test("WebSocket delivery executes terminal repair on custom openai-responses provider", async () => {
+      const source = controlledSse();
+      const scheduler = new ManualTerminalScheduler();
+      const testAbort = new AbortController();
+
+      globalThis.fetch = (async () => {
+        return new Response(source.stream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }) as typeof fetch;
+
+      const config = {
+        providers: {
+          "custom-ws": {
+            adapter: "openai-responses",
+            baseUrl: "https://custom-ws-gateway.test/v1",
+            responsesTerminalRepair: 500,
+          },
+        },
+      } as unknown as OcxConfig;
+
+      const response = await handleResponses(
+        new Request("http://localhost/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "custom-ws/custom-model", input: "hello", stream: true }),
+        }),
+        config,
+        { model: "", provider: "" },
+        {
+          abortSignal: testAbort.signal,
+          inboundTransport: "websocket",
+          responsesTerminalRepairScheduler: scheduler,
+        } as Parameters<typeof handleResponses>[3],
+      );
+
+      const sent: string[] = [];
+      const ws = {
+        readyState: 1,
+        data: {},
+        send(message: string) { sent.push(message); return 1; },
+      } as Parameters<typeof sendResponseToWebSocket>[0];
+
+      try {
+        const pump = sendResponseToWebSocket(ws, response, () => true);
+
+        source.push([
+          sse({ type: "response.created", response: { id: "resp_custom_ws", status: "in_progress", output: [] }, sequence_number: 0 }),
+          sse({ type: "response.output_item.added", item: { type: "message", id: "msg_custom_ws", role: "assistant", status: "in_progress", content: [] }, output_index: 0, sequence_number: 1 }),
+          sse({ type: "response.output_item.done", item: { type: "message", id: "msg_custom_ws", role: "assistant", status: "completed", content: [{ type: "output_text", text: "ws-hi" }] }, output_index: 0, sequence_number: 2 }),
+        ].join(""));
+
+        for (let i = 0; i < 20 && !sent.some(frame => JSON.parse(frame).type === "response.output_item.done"); i += 1) {
+          await Bun.sleep(0);
+        }
+        expect(sent.some(frame => JSON.parse(frame).type === "response.output_item.done")).toBe(true);
+        expect(sent.some(frame => JSON.parse(frame).type === "response.completed")).toBe(false);
+
+        for (let i = 0; i < 20 && scheduler.pending() === 0; i += 1) {
+          await Bun.sleep(0);
+        }
+        expect(scheduler.pending()).toBe(1);
+        scheduler.advance(500);
+        await pump;
+
+        const eventTypes = sent.map(frame => JSON.parse(frame).type as string);
+        expect(eventTypes.filter(type => type === "response.completed")).toHaveLength(1);
+        expect(eventTypes).toContain("response.output_item.done");
+      } finally {
+        testAbort.abort();
+        source.cancel();
+      }
+    });
+
+    test("custom openai-responses provider passes through a real upstream terminal without repair", async () => {
+      const source = controlledSse();
+      const scheduler = new ManualTerminalScheduler();
+      const testAbort = new AbortController();
+
+      globalThis.fetch = (async () => {
+        return new Response(source.stream, {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }) as typeof fetch;
+
+      const config = {
+        providers: {
+          "custom-pt": {
+            adapter: "openai-responses",
+            baseUrl: "https://custom-passthrough.test/v1",
+            responsesTerminalRepair: 500,
+          },
+        },
+      } as unknown as OcxConfig;
+
+      const response = await handleResponses(
+        new Request("http://localhost/v1/responses", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "custom-pt/custom-model", input: "hello", stream: true }),
+        }),
+        config,
+        { model: "", provider: "" },
+        {
+          abortSignal: testAbort.signal,
+          responsesTerminalRepairScheduler: scheduler,
+        } as Parameters<typeof handleResponses>[3],
+      );
+
+      const reader = response.body!.getReader();
+      try {
+        source.push([
+          sse({ type: "response.created", response: { id: "resp_passthrough", status: "in_progress", output: [] }, sequence_number: 0 }),
+          sse({ type: "response.output_item.added", item: { type: "message", id: "msg_pt", role: "assistant", status: "in_progress", content: [] }, output_index: 0, sequence_number: 1 }),
+          sse({ type: "response.output_item.done", item: { type: "message", id: "msg_pt", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }] }, output_index: 0, sequence_number: 2 }),
+          sse({ type: "response.completed", response: { id: "resp_passthrough", status: "completed", output: [{ type: "message", id: "msg_pt", role: "assistant", status: "completed", content: [{ type: "output_text", text: "done" }] }] }, sequence_number: 3 }),
+        ].join(""));
+
+        const full = await readUntil(reader, "response.completed");
+        expect(full).toContain("response.completed");
+        expect(full).toContain("resp_passthrough");
+        // When a real terminal arrives, the scheduler should NOT have fired
+        expect(scheduler.pending()).toBe(0);
+      } finally {
+        testAbort.abort();
+        source.cancel();
+        await reader.cancel().catch(() => {});
+      }
+    });
   });
 });
