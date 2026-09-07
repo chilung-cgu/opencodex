@@ -8,7 +8,10 @@
  * flipped the wire back, so the end-to-end cases assert the captured upstream URL —
  * the externally observable wire. Pattern mirrors tests/providers/deepseek-inbound-wire.test.ts.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import * as oauth from "../../../src/oauth";
+import { fetchProviderModels } from "../../../src/codex/catalog/provider-fetch";
+import { clearModelCache } from "../../../src/codex/model-cache";
 import { providerConfigSeed } from "../../../src/providers/derive";
 import { getProviderRegistryEntry } from "../../../src/providers/registry";
 import { resolveWireProtocolOverride } from "../../../src/server/adapter-resolve";
@@ -33,6 +36,32 @@ const RESPONSES_ONLY = [
 const CHAT_SERVED = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "gemini-2.5-pro", "gpt-5-mini"] as const;
 
 const INBOUNDS = ["responses", "chat", "anthropic"] as const;
+const DISCOVERY_ONLY = ["gpt-6-astra", "grok-4.5", "grok-4.6", "mai-code-1.1-flash", "mai-code-1-flash-picker"];
+
+describe("Copilot discovery-only models do not widen the cold-start seed", () => {
+  for (const authMode of ["key", "oauth"] as const) {
+    test(`${authMode} discovery exposes new models but failure retains the configured seed`, async () => {
+      const auth = spyOn(oauth, "resolveModelsAuthToken").mockResolvedValue("test-token");
+      const original = globalThis.fetch;
+      const provider = { ...providerConfigSeed(getProviderRegistryEntry("github-copilot")!), authMode, apiKey: "test-token" };
+      try {
+        clearModelCache("github-copilot");
+        globalThis.fetch = (async () => Response.json({ data: DISCOVERY_ONLY.map(id => ({ id })) })) as typeof fetch;
+        const live = await fetchProviderModels("github-copilot", { ...provider, fetch: globalThis.fetch } as OcxProviderConfig, 0);
+        expect(live.map(model => model.id).sort()).toEqual([...DISCOVERY_ONLY].sort());
+        clearModelCache("github-copilot");
+        globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
+        const fallback = await fetchProviderModels("github-copilot", { ...provider, fetch: globalThis.fetch } as OcxProviderConfig, 0);
+        expect(fallback.map(model => model.id).sort()).toEqual([...provider.models!].sort());
+        for (const model of DISCOVERY_ONLY) expect(fallback.some(row => row.id === model)).toBe(false);
+      } finally {
+        globalThis.fetch = original;
+        auth.mockRestore();
+        clearModelCache("github-copilot");
+      }
+    });
+  }
+});
 
 function copilotProvider(): OcxProviderConfig {
   // The entry's allowKeyAuthOverride lets tests use key auth instead of live OAuth.

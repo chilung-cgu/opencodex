@@ -80,7 +80,7 @@ differing backup and rewrites known legacy namespaced selected ids to bare ids.
 
 ### GPT-6 Astra
 
-`gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker` uses the Codex-login route; `openai-apikey/gpt-6-astra` uses your API key.
+`gpt-6-astra` uses the Codex-login route; `openai-apikey/gpt-6-astra` uses your API key.
 Availability still depends on the upstream account. Native Astra keeps the shipped Codex defaults:
 272,000 context, `low` reasoning, and the `low`/`medium`/`high`/`xhigh`/`max`/`ultra` ladder.
 Its Fast catalog description is **2x speed**; that is not the billing multiplier.
@@ -235,7 +235,7 @@ Supported bare native GPT rows in the local Codex catalog also accept exact labe
 Both startup synchronization and local catalog convergence reapply these labels. Removing a label
 restores the original native name only when the row's display name still matches the applied
 override. A newer external display name is preserved subject to existing native metadata normalization;
-for example, Astra (`gpt-6-astra`, `grok-4.5`, `grok-4.6`, `mai-code-1.1-flash`, `mai-code-1-flash-picker`) still replaces a non-pinned name with its pinned native name.
+for example, Astra (`gpt-6-astra`) still replaces a non-pinned name with its pinned native name.
 The label overlay leaves model IDs, metadata (including capabilities), ordering,
 routed combo aliases, and account-qualified rows unchanged. This local catalog override does
 not relabel the HTTP model listings or virtual `*-pro` rows.
