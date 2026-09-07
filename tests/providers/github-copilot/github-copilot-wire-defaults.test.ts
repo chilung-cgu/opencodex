@@ -23,6 +23,7 @@ const RESPONSES_ONLY = [
   "gpt-5.6-luna",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
+  "gpt-6-astra",
 ] as const;
 
 const CHAT_SERVED = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "gemini-2.5-pro", "gpt-5-mini"] as const;
@@ -58,9 +59,9 @@ describe("Copilot chat-served models stay on the provider chat wire", () => {
 
 describe("explicit modelAdapters beat the registry default in both directions", () => {
   test("opt-out: a listed Responses-default model pinned back to chat", () => {
-    const provider = { ...copilotProvider(), modelAdapters: { "gpt-5.4": "openai-chat" } };
+    const provider = { ...copilotProvider(), modelAdapters: { "gpt-6-astra": "openai-chat" } };
     for (const inbound of INBOUNDS) {
-      expect(resolveWireProtocolOverride("github-copilot", "gpt-5.4", provider, inbound).adapter)
+      expect(resolveWireProtocolOverride("github-copilot", "gpt-6-astra", provider, inbound).adapter)
         .toBe("openai-chat");
     }
   });
@@ -84,7 +85,7 @@ describe("the registry default is isolated to the copilot provider", () => {
   test("a same-named model on another provider is untouched", () => {
     const other: OcxProviderConfig = { adapter: "openai-chat", baseUrl: "https://example.com/v1", apiKey: "sk-test" };
     for (const inbound of INBOUNDS) {
-      expect(resolveWireProtocolOverride("some-custom", "gpt-5.4", other, inbound).adapter)
+      expect(resolveWireProtocolOverride("some-custom", "gpt-6-astra", other, inbound).adapter)
         .toBe("openai-chat");
     }
   });
@@ -142,6 +143,12 @@ describe("the wire default survives the handleResponses replay", () => {
     expect(url).toContain("/responses");
     expect(url).not.toContain("/chat/completions");
   });
+
+  for (const inbound of INBOUNDS) {
+    test(`gpt-6-astra reaches /responses on ${inbound} inbound replay`, async () => {
+      expect(await drive("gpt-6-astra", inbound)).toBe("https://api.githubcopilot.com/v1/responses");
+    });
+  }
 
   test("gpt-4o still reaches /chat/completions", async () => {
     expect(await drive("gpt-4o", "responses")).toBe("https://api.githubcopilot.com/chat/completions");

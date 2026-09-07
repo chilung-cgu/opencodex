@@ -669,8 +669,8 @@ device-flow login for a short-lived Copilot API token — not a pasted API key. 
 a key/subscription-token gateway on its OpenAI-compatible endpoint. **Cloudflare AI
 Gateway** needs your account + gateway ids filled into the URL.
 
-Copilot fronts a mixed-wire catalog: its GPT-5 family (`gpt-5.3-codex`, `gpt-5.4`,
-`gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`) rejects
+Copilot fronts a mixed-wire catalog: the following GPT models (`gpt-5.3-codex`, `gpt-5.4`,
+`gpt-5.4-mini`, `gpt-5.5`, `gpt-5.6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-6-astra`) reject
 `/chat/completions` for agent traffic, so opencodex routes those models over the
 Responses API by built-in default while every other Copilot model stays on chat
 completions. The precedence is: hard wire pin → your explicit

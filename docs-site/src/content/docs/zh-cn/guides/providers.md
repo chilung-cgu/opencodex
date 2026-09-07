@@ -359,8 +359,8 @@ GPT-5.6 Sol/Terra/Luna 会预置在提供商的回退列表中，因此即使实
 使用 Bearer **订阅令牌**（而非普通 API 密钥）进行认证。
 **Cloudflare AI Gateway** 需要将 account 和 gateway id 填入 URL。
 
-Copilot 提供混合 wire 目录：其 GPT-5 系列模型（`gpt-5.3-codex`、`gpt-5.4`、
-`gpt-5.4-mini`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`）会拒绝面向
+Copilot 提供混合 wire 目录：其 GPT 模型（`gpt-5.3-codex`、`gpt-5.4`、
+`gpt-5.4-mini`、`gpt-5.5`、`gpt-5.6-luna`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-6-astra`）会拒绝面向
 agent 流量的 `/chat/completions`，因此 opencodex 默认将这些模型路由到 Responses API，而其他
 Copilot 模型仍走 chat completions。优先级为：硬 wire 固定 → 显式
 [`modelAdapters`](/zh-cn/reference/configuration/providers/) 条目 → 注册表默认值 → 提供商级

@@ -3081,6 +3081,7 @@ export const PROVIDER_REGISTRY: readonly ProviderRegistryEntry[] = [
       "gpt-5.6-luna": "openai-responses",
       "gpt-5.6-sol": "openai-responses",
       "gpt-5.6-terra": "openai-responses",
+      "gpt-6-astra": "openai-responses",
     },
     note: "Experimental unofficial Copilot bridge. Logs in via GitHub device flow using the public VS Code OAuth client id, then exchanges for a short-lived Copilot API token (copilot_internal). Requires an active Copilot subscription. GitHub may tighten or revoke this path; do not send confidential material you would not paste into Copilot Chat.",
   },
