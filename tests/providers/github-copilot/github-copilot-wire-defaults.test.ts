@@ -24,6 +24,10 @@ const RESPONSES_ONLY = [
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-6-astra",
+  "grok-4.5",
+  "grok-4.6",
+  "mai-code-1.1-flash",
+  "mai-code-1-flash-picker",
 ] as const;
 
 const CHAT_SERVED = ["gpt-4o", "gpt-4.1", "gpt-4.1-mini", "claude-sonnet-4", "gemini-2.5-pro", "gpt-5-mini"] as const;
@@ -144,10 +148,12 @@ describe("the wire default survives the handleResponses replay", () => {
     expect(url).not.toContain("/chat/completions");
   });
 
-  for (const inbound of INBOUNDS) {
-    test(`gpt-6-astra reaches /responses on ${inbound} inbound replay`, async () => {
-      expect(await drive("gpt-6-astra", inbound)).toBe("https://api.githubcopilot.com/v1/responses");
-    });
+  for (const model of ["gpt-6-astra", "grok-4.5", "grok-4.6", "mai-code-1.1-flash", "mai-code-1-flash-picker"]) {
+    for (const inbound of INBOUNDS) {
+      test(`${model} reaches /responses on ${inbound} inbound replay`, async () => {
+        expect(await drive(model, inbound)).toBe("https://api.githubcopilot.com/v1/responses");
+      });
+    }
   }
 
   test("gpt-4o still reaches /chat/completions", async () => {
