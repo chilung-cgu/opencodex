@@ -62,13 +62,15 @@ describe("Copilot chat-served models stay on the provider chat wire", () => {
 });
 
 describe("explicit modelAdapters beat the registry default in both directions", () => {
-  test("opt-out: a listed Responses-default model pinned back to chat", () => {
-    const provider = { ...copilotProvider(), modelAdapters: { "gpt-6-astra": "openai-chat" } };
-    for (const inbound of INBOUNDS) {
-      expect(resolveWireProtocolOverride("github-copilot", "gpt-6-astra", provider, inbound).adapter)
-        .toBe("openai-chat");
-    }
-  });
+  for (const model of RESPONSES_ONLY) {
+    test(`opt-out: ${model} pinned back to chat`, () => {
+      const provider = { ...copilotProvider(), modelAdapters: { [model]: "openai-chat" } };
+      for (const inbound of INBOUNDS) {
+        expect(resolveWireProtocolOverride("github-copilot", model, provider, inbound).adapter)
+          .toBe("openai-chat");
+      }
+    });
+  }
 
   test("opt-in: an unlisted model mapped to Responses (the gpt-5.4-nano escape hatch)", () => {
     const provider = { ...copilotProvider(), modelAdapters: { "gpt-5.4-nano": "openai-responses" } };
@@ -86,13 +88,15 @@ describe("explicit modelAdapters beat the registry default in both directions", 
 });
 
 describe("the registry default is isolated to the copilot provider", () => {
-  test("a same-named model on another provider is untouched", () => {
-    const other: OcxProviderConfig = { adapter: "openai-chat", baseUrl: "https://example.com/v1", apiKey: "sk-test" };
-    for (const inbound of INBOUNDS) {
-      expect(resolveWireProtocolOverride("some-custom", "gpt-6-astra", other, inbound).adapter)
-        .toBe("openai-chat");
-    }
-  });
+  for (const model of RESPONSES_ONLY) {
+    test(`${model} on another provider is untouched`, () => {
+      const other: OcxProviderConfig = { adapter: "openai-chat", baseUrl: "https://example.com/v1", apiKey: "sk-test" };
+      for (const inbound of INBOUNDS) {
+        expect(resolveWireProtocolOverride("some-custom", model, other, inbound).adapter)
+          .toBe("openai-chat");
+      }
+    });
+  }
 
   test("resolution preserves credentials and base URL through the copy", () => {
     const resolved = resolveWireProtocolOverride("github-copilot", "gpt-5.4", copilotProvider(), "responses");
