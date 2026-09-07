@@ -27,9 +27,18 @@ rotation does not protect against provider enforcement.
 
 Operational contract when enabled:
 
-- Upstream **429** cools that account using `Retry-After` when present (else a default backoff),
-  clears its affinities, and may rotate to another eligible account within the same request
-  (bounded).
+- Upstream **429** cools that account, clears its affinities, and may rotate to another eligible
+  account within the same request (bounded). The cooldown uses a usable `Retry-After` when present,
+  otherwise the latest valid reset time among windows Anthropic marks `rejected`, including
+  weekly windows. Valid upstream deadlines are not shortened to a fixed cooldown ceiling.
+  A refusal with no usable deadline falls back to a 60-second default backoff.
+- Responses report the serving account's 5-hour and weekly utilization, and whichever of those
+  two the response carries is recorded for that account — each window independently, and a
+  refusal counts as well as a success. Usage-aware selection works from ordinary traffic,
+  without waiting for a dashboard poll. Headers preserve model-specific quota windows and do
+  not postpone usage probes or clear a failed usage probe's unavailable status. Measurements
+  whose known reset time has passed are discarded as unknown, including retained model-specific
+  windows. Values without a known reset are preserved; missing data is never reported as zero usage.
 - Affinity is **process-local** (lost on proxy restart).
 - **401/403** credential failures quarantine the account (`needsReauth`) so it is excluded from
   selection until re-authenticated.
