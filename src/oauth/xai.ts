@@ -2,6 +2,7 @@
 import { OAuthCallbackFlow, type OAuthCallbackFlowOptions } from "./callback-server";
 import { generatePKCE } from "./pkce";
 import type { LocalTokenImportMode, OAuthController, OAuthCredentials } from "./types";
+import { parseRetryAfterMs as parseStrictRetryAfterMs } from "../lib/http-retry-after";
 
 const XAI_OAUTH_ISSUER = "https://auth.x.ai";
 export const XAI_OAUTH_DISCOVERY_URL = `${XAI_OAUTH_ISSUER}/.well-known/openid-configuration`;
@@ -93,17 +94,21 @@ function getTokenIdentity(accessToken: string, idToken: string | undefined): { a
 }
 
 export class XaiTokenRequestError extends Error { constructor(public readonly status?:number,public readonly oauthError?:string,message="xAI token request failed",options?:{cause?:unknown}){super(message,options);this.name="XaiTokenRequestError";} }
-export interface XaiTokenRetryDeps { sleep?:(ms:number)=>Promise<void>; random?:()=>number }
-function isAbortError(error:unknown):boolean{return error instanceof DOMException&&error.name==="AbortError";}
-function retryDelay(attempt:number,retryAfter:string|null,random:()=>number):number{const base=attempt===1?100:250,j=Math.round(base*(.75+random()*.5)),seconds=retryAfter!==null&&/^\d+$/.test(retryAfter)?Number(retryAfter):0;return Math.min(2000,Math.max(j,seconds*1000));}
+export interface XaiTokenRetryDeps { sleep?:(ms:number,signal?:AbortSignal)=>Promise<void>; random?:()=>number }
+const MAX_RETRY_DELAY_MS = 60_000;
+function parseRetryAfterMs(header:string|null):number|undefined{const trimmed=header?.trim();if(!trimmed)return undefined;if(/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)){const seconds=Number(trimmed);return Number.isFinite(seconds)&&seconds>0?Math.min(MAX_RETRY_DELAY_MS,Math.max(1,Math.ceil(seconds*1000))):undefined;}const parsed=parseStrictRetryAfterMs(trimmed,Date.now(),{maxMs:MAX_RETRY_DELAY_MS});return parsed===undefined?undefined:Math.min(MAX_RETRY_DELAY_MS,parsed);}
+function retryDelay(attempt:number,retryAfter:string|null,random:()=>number):number{const base=attempt===1?100:250,j=Math.round(base*(.75+random()*.5)),localCap=Math.min(2000,j);const retryAfterMs=parseRetryAfterMs(retryAfter);return retryAfterMs===undefined?localCap:Math.min(MAX_RETRY_DELAY_MS,Math.max(localCap,retryAfterMs));}
+function abortError(signal?:AbortSignal):unknown{return signal?.aborted?signal.reason:new DOMException("The operation was aborted.","AbortError");}
+function sleep(ms:number,signal?:AbortSignal):Promise<void>{return new Promise((resolve,reject)=>{if(signal?.aborted){reject(abortError(signal));return;}let timer:ReturnType<typeof setTimeout>;const cleanup=()=>signal?.removeEventListener("abort",onAbort);const onAbort=()=>{clearTimeout(timer);cleanup();reject(abortError(signal));};timer=setTimeout(()=>{cleanup();resolve();},ms);signal?.addEventListener("abort",onAbort,{once:true});if(signal?.aborted)onAbort();});}
+function waitForRetry(wait:(ms:number,signal?:AbortSignal)=>Promise<void>,ms:number,signal?:AbortSignal):Promise<void>{if(!signal)return wait(ms);return new Promise((resolve,reject)=>{let settled=false;const cleanup=()=>signal.removeEventListener("abort",onAbort);const finish=()=>{if(settled)return;settled=true;cleanup();resolve();};const fail=(error:unknown)=>{if(settled)return;settled=true;cleanup();reject(error);};const onAbort=()=>fail(abortError(signal));signal.addEventListener("abort",onAbort,{once:true});if(signal.aborted){onAbort();return;}let pending:Promise<void>;try{pending=wait(ms,signal);}catch(error){fail(error);return;}void pending.then(finish,fail);});}
 async function readTokenError(response:Response):Promise<XaiTokenRequestError>{let oauthError:string|undefined,detail="";try{const body=await response.json() as {error?:unknown;error_description?:unknown};if(typeof body.error==="string")oauthError=body.error;if(typeof body.error_description==="string")detail=body.error_description;}catch{}const suffix=detail?`: ${detail}`:oauthError?`: ${oauthError}`:"";return new XaiTokenRequestError(response.status,oauthError,`xAI token request failed: ${response.status}${suffix}`);}
 export async function postXaiToken(
   tokenEndpoint: string,
   body: Record<string, string>,
   signal?: AbortSignal, deps:XaiTokenRetryDeps={},
 ): Promise<XaiTokenPayload> {
- const sleep=deps.sleep??(ms=>Bun.sleep(ms)),random=deps.random??Math.random;let last:unknown;
- for(let attempt=1;attempt<=3;attempt++){let response:Response;try{response=await fetch(tokenEndpoint, {
+ const wait=deps.sleep??sleep,random=deps.random??Math.random;let last:unknown;
+ for(let attempt=1;attempt<=3;attempt++){if(attempt>1&&signal?.aborted)throw abortError(signal);let response:Response;try{response=await fetch(tokenEndpoint, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -111,7 +116,7 @@ export async function postXaiToken(
     },
     body: new URLSearchParams(body).toString(),
     signal: requestSignal(signal),
-  });}catch(error){if(isAbortError(error)&&signal?.aborted)throw error;last=error;if(attempt===3)throw new XaiTokenRequestError(undefined,undefined,"xAI token request failed: network error",{cause:error});await sleep(retryDelay(attempt,null,random));continue;}if(response.ok)return await response.json() as XaiTokenPayload;const error=await readTokenError(response);last=error;if(!(response.status===429||response.status>=500)||attempt===3)throw error;await sleep(retryDelay(attempt,response.headers.get("retry-after"),random));}throw last;
+  });}catch(error){if(signal?.aborted)throw abortError(signal);if(signal?.reason!==undefined&&error===signal.reason)throw error;last=error;if(attempt===3)throw new XaiTokenRequestError(undefined,undefined,"xAI token request failed: network error",{cause:error});await waitForRetry(wait,retryDelay(attempt,null,random),signal);continue;}if(response.ok){if(signal?.aborted)throw abortError(signal);return await response.json() as XaiTokenPayload;}const error=await readTokenError(response);if(signal?.aborted)throw abortError(signal);last=error;if(!(response.status===429||response.status>=500)||attempt===3)throw error;await waitForRetry(wait,retryDelay(attempt,response.headers.get("retry-after"),random),signal);}throw last;
 }
 
 function credentialsFromTokenPayload(payload: XaiTokenPayload, refreshFallback = ""): OAuthCredentials {
