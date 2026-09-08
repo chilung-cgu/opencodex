@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   discoverXaiOAuthEndpoints,
   validateXaiEndpoint,
-  XAI_OAUTH_DISCOVERY_URL,
 } from "../../../src/oauth/xai";
 
 const originalFetch = globalThis.fetch;

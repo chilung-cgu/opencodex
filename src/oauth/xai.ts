@@ -55,7 +55,8 @@ export function validateXaiEndpoint(rawUrl: string): string {
     parsed.password ||
     !TRUSTED_XAI_AUTH_HOSTS.has(host)
   ) {
-    throw new Error(`xAI OAuth discovery returned an unexpected endpoint: ${rawUrl}`);
+    const sanitized = `${parsed.protocol}//${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+    throw new Error(`xAI OAuth discovery returned an unexpected endpoint: ${sanitized}`);
   }
   return parsed.toString();
 }
