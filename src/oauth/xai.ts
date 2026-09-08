@@ -44,10 +44,17 @@ function requestSignal(signal: AbortSignal | undefined): AbortSignal {
   return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 }
 
-function validateXaiEndpoint(rawUrl: string): string {
+const TRUSTED_XAI_AUTH_HOSTS = new Set(["auth.x.ai", "accounts.x.ai"]);
+
+export function validateXaiEndpoint(rawUrl: string): string {
   const parsed = new URL(rawUrl);
   const host = parsed.hostname.toLowerCase();
-  if (parsed.protocol !== "https:" || (host !== "x.ai" && !host.endsWith(".x.ai"))) {
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username ||
+    parsed.password ||
+    !TRUSTED_XAI_AUTH_HOSTS.has(host)
+  ) {
     throw new Error(`xAI OAuth discovery returned an unexpected endpoint: ${rawUrl}`);
   }
   return parsed.toString();
