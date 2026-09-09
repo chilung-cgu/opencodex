@@ -1298,6 +1298,7 @@
     "ws-upstream-reuse.test.ts": "responses",
     "ws-upstream.test.ts": "responses",
     "xai-client.test.ts": "images",
+    "xai-endpoint-validation.test.ts": "providers/xai",
     "xai-oauth-retry.test.ts": "providers/xai",
     "xai-refresh-lock.test.ts": "providers/xai",
     "xai-tool-schema.test.ts": "providers/xai",
