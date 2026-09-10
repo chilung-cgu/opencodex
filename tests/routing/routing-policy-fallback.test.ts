@@ -10,6 +10,7 @@ import {
   handleResponsesWithPolicyFallback,
   rankPolicyFallbackCandidates,
 } from "../../src/server/responses/policy-fallback";
+import { getOrAllocateRequestSessionLane } from "../../src/server/request-log-conversation";
 
 function policyTrace(): RouteDecisionTraceV1 {
   return {
@@ -48,6 +49,33 @@ function seedAttempt(logCtx: RequestLogContext, provider: string, model: string)
 }
 
 describe("policy candidate fallback", () => {
+  test("carries allocated request session lane across candidate retry attempts (#4172)", async () => {
+    const initial = request();
+    const initialLane = getOrAllocateRequestSessionLane(initial);
+    const observedLanes: string[] = [];
+
+    const response = await handleResponsesWithPolicyFallback(
+      initial,
+      { port: 0, defaultProvider: "provider-a", providers: {} } as unknown as OcxConfig,
+      { model: "", provider: "" } as RequestLogContext,
+      {},
+      {
+        runCore: async (req, _config, context) => {
+          observedLanes.push(getOrAllocateRequestSessionLane(req));
+          context.routeDecision = policyTrace();
+          return observedLanes.length === 1
+            ? Response.json({ error: { message: "transient error" } }, { status: 503 })
+            : Response.json({ status: "completed" });
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(observedLanes).toHaveLength(2);
+    expect(observedLanes[0]).toBe(initialLane);
+    expect(observedLanes[1]).toBe(initialLane);
+  });
+
   test("policy hops retain only the original sidecar snapshot outside primary headers", async () => {
     const authorization = `Bearer ${fakeChatGptJwt({ chatgpt_account_id: "sidecar-account" })}`;
     const initial = request();

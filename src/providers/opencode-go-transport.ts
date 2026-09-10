@@ -22,7 +22,14 @@ export function deriveOpenCodeGoSessionId(sessionLane: string): string {
   return `ocx_${digest}`;
 }
 
-/** Add per-conversation Go affinity only to the canonical fixed-key destination. */
+/**
+ * Add per-conversation Go affinity only to the canonical fixed-key destination.
+ *
+ * When an explicit or WeakMap-allocated session lane is provided, it is hashed into
+ * a stable session id. If an unlinked caller passes undefined, randomUUID() serves
+ * as a standalone fallback to satisfy Console Go header requirements without asserting
+ * cross-request stability.
+ */
 export function resolveOpenCodeGoTransport<T extends OcxProviderConfig>(
   provider: T,
   sessionLane: string | undefined,

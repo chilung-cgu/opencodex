@@ -8,6 +8,7 @@ import { handleResponses as handleResponsesCore } from "./core";
 import { requestPacingOverloadResponse } from "./pacing-overload";
 import { captureExplicitOpenAiCallerAuth } from "../../providers/openai-sidecar";
 import { captureCallerDirectAuth } from "../../providers/caller-authorization";
+import { linkRequestSessionLane } from "../request-log-conversation";
 
 type CoreHandler = typeof handleResponsesCore;
 type CoreOptions = Parameters<CoreHandler>[3];
@@ -56,12 +57,14 @@ function requestWithCandidate(
   headers.delete("content-encoding");
   headers.delete("content-length");
   headers.set("content-type", "application/json");
-  return new Request(req.url, {
+  const retryRequest = new Request(req.url, {
     method: req.method,
     headers,
     body: JSON.stringify({ ...rawBody, model: `${candidate.provider}/${candidate.model}` }),
     signal: req.signal,
   });
+  linkRequestSessionLane(req, retryRequest);
+  return retryRequest;
 }
 
 function errorCodeFromText(text: string): string | undefined {

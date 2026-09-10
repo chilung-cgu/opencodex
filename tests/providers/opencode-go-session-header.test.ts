@@ -6,6 +6,9 @@ import { getProviderRegistryEntry } from "../../src/providers/registry";
 import { handleResponses } from "../../src/server/responses/core";
 import { handleChatCompletions } from "../../src/server/chat-completions";
 import { handleClaudeMessages } from "../../src/server/claude-messages";
+import { handleResponsesWithPolicyFallback } from "../../src/server/responses/policy-fallback";
+import type { RequestLogContext } from "../../src/server/request-log";
+import type { RouteDecisionTraceV1 } from "../../src/routing/trace";
 import type { OcxConfig, OcxProviderConfig } from "../../src/types";
 
 const MUSE_MODEL = "muse-spark-1.3-contributor";
@@ -414,6 +417,114 @@ describe("OpenCode Go session affinity (#3344)", () => {
     const sourceLane = getOrAllocateRequestSessionLane(sourceReq);
     const targetLane = getOrAllocateRequestSessionLane(targetReq);
     expect(sourceLane).toBe(targetLane);
+  });
+
+  test("handleResponsesWithPolicyFallback retains the same Go affinity across retried candidate attempts (#4172)", async () => {
+    const trace: RouteDecisionTraceV1 = {
+      version: 1,
+      decisionId: "decision-policy-go",
+      createdAt: 1,
+      requestedModel: "policy/go-test",
+      routeKind: "policy",
+      profile: { id: "go-test", revision: "rev-1" },
+      requirements: [],
+      candidates: [
+        { provider: "opencode-go", model: MUSE_MODEL, eligible: true, exclusions: [], score: { total: 0.9, components: {} } },
+        { provider: "opencode-go", model: CHAT_MODEL, eligible: true, exclusions: [], score: { total: 0.8, components: {} } },
+      ],
+      selected: { candidateIndex: 0, provider: "opencode-go", model: MUSE_MODEL, reason: "highest-score" },
+    };
+
+    const capturedHeaders: string[] = [];
+    const capturedUrls: string[] = [];
+    globalThis.fetch = (async (requestInput: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(requestInput);
+      capturedUrls.push(url);
+      const headers = new Headers(init?.headers);
+      const session = headers.get(SESSION_HEADER);
+      if (session) capturedHeaders.push(session);
+      if (url.endsWith("/responses")) {
+        return Response.json({ error: { message: "rate limited upstream" } }, { status: 429 });
+      }
+      return upstreamResponse(url);
+    }) as typeof fetch;
+
+    const initialReq = new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "policy/go-test", input: "ping", stream: false }),
+    });
+
+    const config = {
+      providers: { "opencode-go": opencodeGo() },
+    } as unknown as OcxConfig;
+
+    const logCtx = { model: "", provider: "" } as RequestLogContext;
+    const response = await handleResponsesWithPolicyFallback(
+      initialReq,
+      config,
+      logCtx,
+      { inboundWire: "responses" },
+      {
+        runCore: async (candidateReq, cfg, ctx, options) => {
+          const body = await candidateReq.clone().json() as { model: string };
+          ctx.routeDecision = trace;
+          // For the initial policy request, forward as candidate 0
+          const forwardReq = body.model === "policy/go-test"
+            ? new Request(candidateReq.url, {
+                method: candidateReq.method,
+                headers: candidateReq.headers,
+                body: JSON.stringify({ ...body, model: `opencode-go/${MUSE_MODEL}` }),
+                signal: candidateReq.signal,
+              })
+            : candidateReq;
+          linkRequestSessionLane(candidateReq, forwardReq);
+          const res = await handleResponses(
+            forwardReq,
+            cfg,
+            ctx,
+            { ...options, comboAttempt: true },
+          );
+          ctx.routeDecision = trace;
+          return res;
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(capturedUrls).toHaveLength(2);
+    expect(capturedUrls[0]).toContain("/responses");
+    expect(capturedUrls[1]).toContain("/chat/completions");
+    expect(capturedHeaders).toHaveLength(2);
+    expect(capturedHeaders[0]).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(capturedHeaders[1]).toBe(capturedHeaders[0]);
+
+    // An independent sessionless request receives a distinct Go affinity
+    const independentCaptured: string[] = [];
+    globalThis.fetch = (async (requestInput: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const session = headers.get(SESSION_HEADER);
+      if (session) independentCaptured.push(session);
+      return upstreamResponse(String(requestInput));
+    }) as typeof fetch;
+
+    const secondReq = new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "opencode-go/muse-spark-1.3-contributor", input: "ping", stream: false }),
+    });
+
+    const secondResponse = await handleResponses(
+      secondReq,
+      config,
+      { model: "", provider: "" } as RequestLogContext,
+      { inboundWire: "responses" },
+    );
+
+    expect(secondResponse.status).toBe(200);
+    expect(independentCaptured).toHaveLength(1);
+    expect(independentCaptured[0]).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(independentCaptured[0]).not.toBe(capturedHeaders[0]);
   });
 
   test("does not inject the header into a lookalike destination", async () => {
