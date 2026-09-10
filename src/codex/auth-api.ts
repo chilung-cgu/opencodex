@@ -116,7 +116,7 @@ import type { CodexQuotaRefreshOutcome } from "./quota-refresh-outcome";
 import { getMainAccountHardLockStatus, type MainAccountHardLockStatus } from "./main-account-hard-lock";
 import { observeMainReserveRevocation } from "./reserve-availability";
 import { emailMaskingEnabled, projectEmail } from "../lib/privacy";
-import { codexWarmupFailureReason, warmCodexAccount } from "./warmup";
+import { CodexWarmupError, codexWarmupFailureReason, warmCodexAccount } from "./warmup";
 export { maskEmail } from "../lib/privacy";
 import type { CodexAccount, CodexAccountCredentials, OcxConfig } from "../types";
 import type { CatalogDisposition } from "./convergence-types";
@@ -585,10 +585,14 @@ async function verifyCodexAccountWarmup(
     return { ok: true, validatedAt: Date.now() };
   } catch (err) {
     const reason = codexWarmupFailureReason(err);
+    const isModelProvisioningError = err instanceof CodexWarmupError && (err.status === 400 || err.status === 404);
+    const error = isModelProvisioningError
+      ? "Codex account warmup failed. Verify account model access or provisioning and try again."
+      : "Codex account warmup failed. Reauthenticate the account and try again.";
     return {
       ok: false,
       response: jsonResponse({
-        error: "Codex account warmup failed. Reauthenticate the account and try again.",
+        error,
         code: "codex_warmup_failed",
         reason,
         accountId,

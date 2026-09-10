@@ -28,7 +28,8 @@ export interface CodexWarmupOptions {
 
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
 const DEFAULT_MODEL = "gpt-5.4-mini";
-const FALLBACK_MODELS = ["gpt-5.5"];
+const FALLBACK_MODELS = ["gpt-5.5", "gpt-5.6-luna"];
+const isRetryableWarmupStatus = (status?: number): boolean => status === 400 || status === 404;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 0x7fff_ffff;
 const MAX_ERROR_BODY_BYTES = 2048;
@@ -286,8 +287,8 @@ export async function warmCodexAccount(options: CodexWarmupOptions): Promise<voi
     await tryWarmup(options, primaryModel);
     return;
   } catch (err) {
-    // Retry with fallback models on 400 (model may not be available for this account).
-    if (!(err instanceof CodexWarmupError) || err.status !== 400) throw err;
+    // Retry with fallback models on 400 or 404 (model may not be provisioned or available for this account).
+    if (!(err instanceof CodexWarmupError) || !isRetryableWarmupStatus(err.status)) throw err;
     let lastErr = err;
     for (const fallback of FALLBACK_MODELS) {
       if (fallback === primaryModel) continue;
@@ -295,7 +296,12 @@ export async function warmCodexAccount(options: CodexWarmupOptions): Promise<voi
         await tryWarmup(options, fallback);
         return;
       } catch (retryErr) {
-        if (retryErr instanceof CodexWarmupError) lastErr = retryErr;
+        if (retryErr instanceof CodexWarmupError) {
+          lastErr = retryErr;
+          if (!isRetryableWarmupStatus(retryErr.status)) throw retryErr;
+        } else {
+          throw retryErr;
+        }
       }
     }
     throw lastErr;

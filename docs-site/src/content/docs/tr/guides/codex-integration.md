@@ -425,7 +425,7 @@ Arayüzü](/tr/guides/sub-agent-surface/) sayfasına bakın.
 
 ## Codex hesap ısınması
 
-Hesap ekleme veya yeniden kimlik doğrulama, normalde kaydetmeden önce `response.completed` bekleyen küçük bir model isteğiyle doğrulanır. Varsayılan model `gpt-5.4-mini` olup HTTP 400 durumunda `gpt-5.5` denenir. Genel hatalar ham yanıt gövdesi yerine sabit hata kategorilerini içerir.
+Hesap ekleme veya yeniden kimlik doğrulama, normalde kaydetmeden önce `response.completed` bekleyen küçük bir model isteğiyle doğrulanır. Varsayılan model `gpt-5.4-mini` olup HTTP 400 veya HTTP 404 durumunda `gpt-5.5` ve `gpt-5.6-luna` denenir. Genel hatalar ham yanıt gövdesi yerine sabit hata kategorilerini içerir.
 
 Yeni OAuth belirteciyle yapılan kota sorgusu 5 saatlik, haftalık veya aylık kotanın tükendiğini doğrularsa hesap model çağrısı olmadan kaydedilir ve **Doğrulama bekleniyor** gösterilir. Yeniden başlatma veya belirteç yenileme yönlendirmeyi açmaz. Kota geri geldiğinde kotaları yenileyin: kullanılabilir kapasite gösteren eksiksiz güncel veri küçük bir doğrulama isteğine izin verir. Yalnızca tamamlanan yanıt hesabı etkinleştirir. Hatalarda kısıtlama korunur. Pasif sorgulama bu isteği göndermez. İlk kayıtta bilinmeyen kota normal doğrulamayı gerektirir.
 

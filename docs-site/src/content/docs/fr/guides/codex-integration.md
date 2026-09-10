@@ -375,7 +375,7 @@ délégation v1/base/v2 et de ses mécanismes de repli.
 
 ## Préchauffage des comptes Codex
 
-L’ajout ou la réauthentification vérifie normalement le compte avant son enregistrement par une petite requête attendant `response.completed`. Le modèle par défaut est `gpt-5.4-mini`, avec un essai sur `gpt-5.5` en cas de HTTP 400. Les erreurs publiques contiennent des catégories fixes, sans corps de réponse brut.
+L’ajout ou la réauthentification vérifie normalement le compte avant son enregistrement par une petite requête attendant `response.completed`. Le modèle par défaut est `gpt-5.4-mini`, avec un essai sur `gpt-5.5` et `gpt-5.6-luna` en cas de HTTP 400 ou HTTP 404. Les erreurs publiques contiennent des catégories fixes, sans corps de réponse brut.
 
 Si la lecture authentifiée des quotas avec le nouveau jeton OAuth confirme un quota de 5 heures, hebdomadaire ou mensuel épuisé, le compte est enregistré sans appel au modèle et affiche **Validation en attente**. Il reste exclu du routage après un redémarrage ou un renouvellement du jeton. Après récupération du quota, actualisez les quotas : une lecture récente et complète avec de la capacité disponible permet une petite requête de validation. Seule sa réussite active le compte. Tout échec conserve la restriction. Les lectures passives ne déclenchent pas cette requête. Un quota inconnu à l’inscription conserve la vérification habituelle.
 
