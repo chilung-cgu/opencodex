@@ -2,7 +2,7 @@
  * Best-effort chat/session correlation for Logs / usage.jsonl (#330).
  * Opaque ids only — never persist raw emails or Claude Desktop system-hash fallbacks.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 /** Reject absurdly long client strings before hashing (DoS / JSONL bloat). */
 export const LOG_CONVERSATION_ID_INPUT_MAX = 4096;
@@ -216,4 +216,33 @@ export function summarizeConversationLogs(entries: readonly TotalsSource[]): Con
     unpricedRequests,
     unmeteredRequests,
   };
+}
+
+const requestAllocatedSessionLanes = new WeakMap<Request, string>();
+
+/**
+ * Link session lane identity from a source Request to an internal/child Request.
+ * Preserves ephemeral allocated lanes across internal request translation/fanout.
+ */
+export function linkRequestSessionLane(sourceReq: Request, targetReq: Request): void {
+  const lane = getOrAllocateRequestSessionLane(sourceReq);
+  requestAllocatedSessionLanes.set(targetReq, lane);
+}
+
+/**
+ * Resolve or allocate a request-scoped session lane identity.
+ * If the request has an explicit session lane (headers or x-opencode-session), use it.
+ * Otherwise, allocates an ephemeral UUID once per admitted request, retained across retries.
+ */
+export function getOrAllocateRequestSessionLane(req: Request): string {
+  const explicit = sessionLaneIdFromRequest(req.headers)
+    ?? normalizeLogConversationId(req.headers.get("x-opencode-session"));
+  if (explicit) return explicit;
+
+  let allocated = requestAllocatedSessionLanes.get(req);
+  if (!allocated) {
+    allocated = randomUUID();
+    requestAllocatedSessionLanes.set(req, allocated);
+  }
+  return allocated;
 }

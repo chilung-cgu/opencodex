@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { providerConfigSeed } from "../../src/providers/derive";
 import { resolveOpenCodeGoTransport } from "../../src/providers/opencode-go-transport";
+import { getOrAllocateRequestSessionLane, linkRequestSessionLane } from "../../src/server/request-log-conversation";
 import { getProviderRegistryEntry } from "../../src/providers/registry";
 import { handleResponses } from "../../src/server/responses/core";
 import { handleChatCompletions } from "../../src/server/chat-completions";
@@ -138,7 +139,8 @@ describe("OpenCode Go session affinity (#3344)", () => {
     const metadata = await captureRequest({ ...input, metadataUserId: "user_test_account__session_conversation-a" });
     const desktop = await captureRequest(input);
     expect(metadata.headers.get(SESSION_HEADER)).toBe("ocx_a89540229ef781fd5f7adf92a711b436");
-    expect(desktop.headers.has(SESSION_HEADER)).toBe(false);
+    expect(desktop.headers.get(SESSION_HEADER)).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(desktop.headers.get(SESSION_HEADER)).not.toBe("ocx_a89540229ef781fd5f7adf92a711b436");
   });
 
   test("Claude explicit Go header precedes metadata and matches native Chat affinity", async () => {
@@ -185,11 +187,11 @@ describe("OpenCode Go session affinity (#3344)", () => {
       }
     });
 
-    test(`Claude ${model} omits Go affinity without usable metadata identity`, async () => {
+    test(`Claude ${model} assigns isolated Go affinity without usable metadata identity`, async () => {
       for (const metadataUserId of [undefined, "", " \t\n ", "invalid\u0000identity", "x".repeat(4097)]) {
         const captured = await captureRequest({ claude: true, model, metadataUserId });
         expect(captured.url).toBe(url);
-        expect(captured.headers.has(SESSION_HEADER)).toBe(false);
+        expect(captured.headers.get(SESSION_HEADER)).toMatch(/^ocx_[0-9a-f]{32}$/);
         expect(captured.headers.has("session_id")).toBe(false);
       }
     });
@@ -351,12 +353,67 @@ describe("OpenCode Go session affinity (#3344)", () => {
     expect([...captured.headers.keys()].filter(name => name === SESSION_HEADER)).toHaveLength(1);
   });
 
-  test("keeps generated affinity runtime-only and omits it without a stable lane", async () => {
+  test("assigns isolated affinity without a stable lane and keeps configured headers untouched", async () => {
     const configured = opencodeGo();
     await captureRequest({ provider: configured });
     expect(configured.headers?.[SESSION_HEADER]).toBeUndefined();
-    expect(resolveOpenCodeGoTransport(configured, undefined)).toBe(configured);
-    expect(resolveOpenCodeGoTransport(configured, undefined).headers?.[SESSION_HEADER]).toBeUndefined();
+    const first = resolveOpenCodeGoTransport(configured, undefined);
+    const second = resolveOpenCodeGoTransport(configured, undefined);
+    expect(first.headers?.[SESSION_HEADER]).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(second.headers?.[SESSION_HEADER]).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(first.headers?.[SESSION_HEADER]).not.toBe(second.headers?.[SESSION_HEADER]);
+    expect(configured.headers?.[SESSION_HEADER]).toBeUndefined();
+  });
+
+  test("two independent sessionless Claude requests receive distinct Go affinities", async () => {
+    const first = await captureRequest({ claude: true, model: CHAT_MODEL });
+    const second = await captureRequest({ claude: true, model: CHAT_MODEL });
+    const firstSession = first.headers.get(SESSION_HEADER);
+    const secondSession = second.headers.get(SESSION_HEADER);
+    expect(firstSession).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(secondSession).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(firstSession).not.toBe(secondSession);
+  });
+
+  test("two independent sessionless native Chat requests receive distinct Go affinities", async () => {
+    const headers = { "content-type": "application/json" };
+    const first = await captureRequest({ nativeChat: true, model: "omen-alpha", headers });
+    const second = await captureRequest({ nativeChat: true, model: "omen-alpha", headers });
+    const firstSession = first.headers.get(SESSION_HEADER);
+    const secondSession = second.headers.get(SESSION_HEADER);
+    expect(firstSession).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(secondSession).toMatch(/^ocx_[0-9a-f]{32}$/);
+    expect(firstSession).not.toBe(secondSession);
+  });
+
+  test("the same admitted request retains the same Go affinity across route normalization and retries", () => {
+    const configured = opencodeGo();
+    const req = new Request("http://localhost/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    const lane1 = getOrAllocateRequestSessionLane(req);
+    const lane2 = getOrAllocateRequestSessionLane(req);
+    expect(lane1).toBe(lane2);
+
+    const transport1 = resolveOpenCodeGoTransport(configured, lane1);
+    const transport2 = resolveOpenCodeGoTransport(configured, lane2);
+    expect(transport1.headers?.[SESSION_HEADER]).toBe(transport2.headers?.[SESSION_HEADER]);
+  });
+
+  test("linking an admitted request forwards the allocated fallback lane to internal replay requests", () => {
+    const sourceReq = new Request("http://localhost/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    const targetReq = new Request("http://localhost/v1/responses", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    });
+    linkRequestSessionLane(sourceReq, targetReq);
+    const sourceLane = getOrAllocateRequestSessionLane(sourceReq);
+    const targetLane = getOrAllocateRequestSessionLane(targetReq);
+    expect(sourceLane).toBe(targetLane);
   });
 
   test("does not inject the header into a lookalike destination", async () => {

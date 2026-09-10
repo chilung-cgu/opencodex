@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { OcxProviderConfig } from "../types";
 import { registryEntryForProviderDestination } from "./registry";
 
@@ -28,14 +28,14 @@ export function resolveOpenCodeGoTransport<T extends OcxProviderConfig>(
   sessionLane: string | undefined,
 ): T {
   if (registryEntryForProviderDestination(provider)?.id !== "opencode-go") return provider;
-  if (!sessionLane) return provider;
+  const effectiveLane = sessionLane || randomUUID();
   if (hasHeaderCaseInsensitive(provider.headers, OPENCODE_GO_SESSION_HEADER)) return provider;
 
   return {
     ...provider,
     headers: {
       ...(provider.headers ?? {}),
-      [OPENCODE_GO_SESSION_HEADER]: deriveOpenCodeGoSessionId(sessionLane),
+      [OPENCODE_GO_SESSION_HEADER]: deriveOpenCodeGoSessionId(effectiveLane),
     },
   };
 }

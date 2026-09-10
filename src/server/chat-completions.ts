@@ -26,7 +26,7 @@ import { NoEligiblePolicyCandidateError, UnknownRoutingPolicyError, routeModel }
 import { evidenceFromBody } from "../routing/request-evidence";
 import { resolveWireProtocolOverride } from "./adapter-resolve";
 import { resolveOpenCodeGoTransport } from "../providers/opencode-go-transport";
-import { normalizeLogConversationId, sessionLaneIdFromRequest } from "./request-log-conversation";
+import { getOrAllocateRequestSessionLane, linkRequestSessionLane, normalizeLogConversationId, sessionLaneIdFromRequest } from "./request-log-conversation";
 import type { OcxConfig } from "../types";
 import { readJsonRequestBody, resolveInboundBodyLimitBytes } from "./request-decompress";
 import {
@@ -143,7 +143,7 @@ async function handleChatCompletionsWithBudget(
   try {
     const route = routeModel(config, chatBody.model as string, evidenceFromBody(chatBody));
     route.provider = resolveOpenCodeGoTransport(route.provider,
-      sessionLaneIdFromRequest(req.headers) ?? normalizeLogConversationId(req.headers.get("x-opencode-session")));
+      getOrAllocateRequestSessionLane(req));
     // Settle the wire once so every branch below reads the adapter this model will
     // actually use, not the provider-wide default (#404).
     route.provider = resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, "chat");
@@ -305,6 +305,7 @@ async function handleChatCompletionsWithBudget(
     headers,
     body: internalBodyJson,
   });
+  linkRequestSessionLane(req, internalReq);
 
   let nativeLogged = false;
   const finalizeNativeLog = (status: number, meta: { terminalStatus?: RequestLogEntry["terminalStatus"]; closeReason: "terminal" | "client_cancel" | "non_stream" }) => {

@@ -322,6 +322,8 @@ import {
   conversationIdFromResponsesRequest,
   normalizeLogConversationId,
   reasoningReplayConversationIdFromResponsesRequest,
+  getOrAllocateRequestSessionLane,
+  linkRequestSessionLane,
   sessionLaneIdFromRequest,
   sessionIdHeaderFromRequest,
 } from "../request-log-conversation";
@@ -2452,7 +2454,7 @@ async function applyFinalRouteRequestNormalization(args: {
   // Settle the wire once so logging, fast-mode, auth, and sidecars read the adapter
   // this request will actually use (#404).
   route.provider = resolveOpenCodeGoTransport(route.provider,
-    sessionLaneIdFromRequest(req.headers) ?? normalizeLogConversationId(req.headers.get("x-opencode-session")));
+    getOrAllocateRequestSessionLane(req));
   route.provider = resolveWireProtocolOverride(route.providerName, route.modelId, route.provider, inboundWire);
   if (preserveAnthropicResponseModel) parsed._responseModelId = responseModelId;
   logCtx.model = route.modelId;
@@ -2816,6 +2818,7 @@ export async function handleComboResponses(
       headers: childHeaders,
       body: JSON.stringify(childBody),
     });
+    linkRequestSessionLane(req, childRequest);
     let resolvedAuth: CodexAuthContext | undefined;
     let terminalRecorder: ((status: ResponsesTerminalStatus, httpStatusOverride?: number) => void) | undefined;
     const started = Date.now();
