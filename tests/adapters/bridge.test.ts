@@ -1577,4 +1577,36 @@ describe("array-backed string accumulation", () => {
       tightBudget.dispose();
     }
   });
+  test("empty text deltas do not accumulate in StringChunks arrays", async () => {
+    const events: AdapterEvent[] = [
+      { type: "text_delta", text: "hello" },
+      { type: "text_delta", text: "" },
+      { type: "text_delta", text: "" },
+      { type: "text_delta", text: " world" },
+      { type: "done", stopReason: "end_turn" },
+    ];
+
+    const frames = await collectSse(bridgeToResponsesSSE(
+      replay(events),
+      "routed/model",
+    ));
+
+    const doneFrame = frames.find(f => f.event === "response.output_text.done");
+    expect(doneFrame).toBeDefined();
+    expect(doneFrame!.data.text).toBe("hello world");
+
+    // Also verify batch mode
+    const budget = createTranslatorBudget();
+    try {
+      const result = buildResponseJSON(events, "routed/model", { translatorBudget: budget });
+      const output = result.output as Record<string, unknown>[];
+      const message = output.find(item => item.type === "message") as Record<string, unknown>;
+      expect(message).toBeDefined();
+      const content = message.content as Record<string, unknown>[];
+      const textContent = content.find(c => c.type === "output_text") as Record<string, unknown>;
+      expect(textContent.text).toBe("hello world");
+    } finally {
+      budget.dispose();
+    }
+  });
 });

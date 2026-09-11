@@ -351,6 +351,7 @@ export function bridgeToResponsesSSE(
     callId?: string,
   ): StringChunks => {
     const fragmentBytes = bytesOf(fragment);
+    if (fragmentBytes === 0) return previous;
     const nextBytes = previous.bytes + fragmentBytes;
     const scope = { kind, ...(callId ? { callId } : {}) };
     const reservation = budget.reserveTransient(nextBytes, scope);
@@ -1648,7 +1649,9 @@ function buildResponseJSONWithBudget(
     kind: TranslatorBufferKind,
     callId?: string,
   ): StringChunks => {
-    const nextBytes = previous.bytes + bytesOf(fragment);
+    const fragmentBytes = bytesOf(fragment);
+    if (fragmentBytes === 0) return previous;
+    const nextBytes = previous.bytes + fragmentBytes;
     if (!budget) {
       previous.chunks.push(fragment);
       return { chunks: previous.chunks, bytes: nextBytes };
