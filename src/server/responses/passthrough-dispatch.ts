@@ -1133,6 +1133,8 @@ export async function preparePassthroughExchange(
         const nextAccountId = rotateGenericOAuthAccountOn429(
           config, route.providerName, transportState.genericFailoverAccountId,
           upstreamResponse.headers.get("retry-after"),
+          Date.now(),
+          route.modelId,
         );
         let snapshot: OAuthAccessSnapshot | undefined;
         if (nextAccountId) {

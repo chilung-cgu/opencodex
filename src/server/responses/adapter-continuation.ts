@@ -410,6 +410,8 @@ export function createAdapterContinuations(
             route.providerName,
             transportState.genericFailoverAccountId,
             response.headers.get("retry-after"),
+            Date.now(),
+            route.modelId,
           )
           : null;
         if (!nextAccountId) hop.permit?.release();
