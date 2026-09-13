@@ -342,7 +342,7 @@ export function bridgeToResponsesSSE(
   ownedWatchdog?.unref?.();
   const clearOwnedWatchdog = () => {
     if (ownedWatchdog !== undefined) clearTimeout(ownedWatchdog);
- };
+  };
   const bytesOf = (value: string): number => Buffer.byteLength(value);
   const appendString = (
     previous: StringChunks,
@@ -1813,7 +1813,7 @@ function buildResponseJSONWithBudget(
     } as OutputItem;
     pushOutput(item, sourceBytes, "reasoning");
     currentSummaryReasoning = emptyChunks();
- };
+  };
   const flushRawReasoning = () => {
     const rawText = joinChunks(currentRawReasoning);
     if (!rawText) return;
@@ -1916,7 +1916,7 @@ function buildResponseJSONWithBudget(
         if (e.text.length > 0) rawReasoningForNextToolCall = "";
         if (currentToolCallId) flushToolCall();
         // Compaction turns keep the summary out of normal message output (replay dedup — see
-       // bridgeToResponsesSSE); it ships only inside the synthetic compaction item below.
+        // bridgeToResponsesSSE); it ships only inside the synthetic compaction item below.
         if (options?.compaction) {
           batchCompaction = appendBatchString(
             batchCompaction, e.text, "retained_collectors",
@@ -1934,13 +1934,13 @@ function buildResponseJSONWithBudget(
         if (currentRawReasoning.bytes > 0) flushRawReasoning();
         if (e.thinking.length > 0) rawReasoningForNextToolCall = "";
         if (currentToolCallId) flushToolCall();
-       {
+        {
           currentSummaryReasoning = appendBatchString(
             currentSummaryReasoning, e.thinking, "reasoning",
           );
-       }
-       break;
-     case "thinking_signature":
+        }
+        break;
+      case "thinking_signature":
         // Like streaming, retain the latest signature update until the next semantic
         // event. Flushing every update would manufacture signature-only siblings.
         batchSignatureBytes = replaceBatchRetainedString(batchSignatureBytes, e.signature, "reasoning");
@@ -1969,15 +1969,15 @@ function buildResponseJSONWithBudget(
         }
         batchKiroRedacted = e.data;
         break;
-     case "reasoning_raw_delta":
-       if (currentText.bytes > 0) flushText("commentary");
-       if (currentSummaryReasoning.bytes > 0) flushSummaryReasoning();
-       if (currentToolCallId) flushToolCall();
-       {
+      case "reasoning_raw_delta":
+        if (currentText.bytes > 0) flushText("commentary");
+        if (currentSummaryReasoning.bytes > 0) flushSummaryReasoning();
+        if (currentToolCallId) flushToolCall();
+        {
           currentRawReasoning = appendBatchString(
             currentRawReasoning, e.text, "reasoning",
           );
-       }
+        }
         break;
       case "tool_call_start": {
         if (currentText.bytes > 0) flushText("commentary");
@@ -2008,12 +2008,12 @@ function buildResponseJSONWithBudget(
         currentToolCallProviderMetadata = e.providerMetadata;
         break;
       }
-     case "tool_call_delta":
-       {
+      case "tool_call_delta":
+        {
           ({ value: currentToolCallArgs, bytes: currentToolCallArgsBytes } = appendBatchStringDirect(
             currentToolCallArgs, currentToolCallArgsBytes, e.arguments, "tool_args", currentToolCallId,
-         ));
-       }
+          ));
+        }
         break;
       case "tool_call_end":
         if (!toolCallArgumentsUsable(currentToolCallArgs) && currentToolCallId) {
