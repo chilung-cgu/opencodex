@@ -724,3 +724,18 @@ Shared response-log retention and native SSE inspection pacing follow the [bound
 Native steering retains fixed phase deadlines and reconciled replay output; see the [steering stability contract](transports/streaming-health.md#steering-deadlines-and-replay-completeness).
 
 Native steering generation overrides, explicit public-API eligibility and the consent-gated wire probe follow the [shared control contract](transports/streaming-health.md#steering-settings-public-api-and-diagnostic-probe); this owner does not change routing or execute diagnostic tools.
+
+### Stream timeline ownership after module extraction
+
+The HTTP contexts in `src/server/index/serve-options.ts` and WebSocket context in
+`src/server/index/websocket-handler.ts` seed the request origin. Combo children in
+`src/server/responses/core-combo.ts` inherit it, and the passthrough inspection
+options in `src/server/responses/passthrough-delivery.ts` retain it. Neither
+compatibility facade recreates those execution paths.
+
+`normalizeStreamDiagnostics` is shared by direct log ingress, persisted usage and
+restart projection, so a safe relay diagnostic cannot disappear only after restart.
+Request-relative and attempt-relative milestones keep separate origins; zero is a
+valid origin. The existing spend, affinity, cache-provenance, Claude compatibility
+and Codex WebSocket stage fields retain their own independent validators.
+Regression coverage is in `tests/usage/request-log.test.ts`.
