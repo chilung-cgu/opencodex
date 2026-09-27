@@ -274,7 +274,7 @@ function installOAuthFetch(
 }
 
 describe("Google Antigravity OAuth upstream 401 replay", () => {
-  test("paused OAuth account returns 503 for CCA image generation", async () => {
+  test("paused OAuth account returns a non-retryable permission error for CCA image generation", async () => {
     await seedOAuth();
     const accountId = getAccountSet("google-antigravity")!.accounts[0]!.id;
     await setAccountPaused("google-antigravity", accountId, true);
@@ -289,7 +289,11 @@ describe("Google Antigravity OAuth upstream 401 replay", () => {
       });
       const body = await response.text();
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(403);
+      expect(JSON.parse(body)).toMatchObject({ error: {
+        type: "permission_error",
+        message: "OAuth account is paused. Resume it in account settings and retry.",
+      } });
       expect(body).toContain("OAuth account is paused");
       expect(body).not.toContain("login required");
       expect(observed.counts.refresh).toBe(0);
@@ -299,7 +303,7 @@ describe("Google Antigravity OAuth upstream 401 replay", () => {
     }
   });
 
-  test("paused OAuth account returns 503 without refresh or upstream dispatch", async () => {
+  test("paused OAuth account returns a non-retryable permission error without refresh or upstream dispatch", async () => {
     await seedOAuth();
     const accountId = getAccountSet("google-antigravity")!.accounts[0]!.id;
     await setAccountPaused("google-antigravity", accountId, true);
@@ -310,7 +314,11 @@ describe("Google Antigravity OAuth upstream 401 replay", () => {
       const response = await postResponses(server);
       const body = await response.text();
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(403);
+      expect(JSON.parse(body)).toMatchObject({ error: {
+        type: "permission_error",
+        message: "OAuth account is paused. Resume it in account settings and retry.",
+      } });
       expect(body).toContain("OAuth account is paused");
       expect(body).not.toContain("login google-antigravity");
       expect(observed.counts.refresh).toBe(0);
@@ -320,7 +328,7 @@ describe("Google Antigravity OAuth upstream 401 replay", () => {
     }
   });
 
-  test("an account paused before OAuth 401 replay returns 503 and does not refresh", async () => {
+  test("an account paused before OAuth 401 replay returns a non-retryable permission error and does not refresh", async () => {
     await seedOAuth();
     const accountId = getAccountSet("google-antigravity")!.accounts[0]!.id;
     saveConfig(antigravityConfig());
@@ -334,7 +342,11 @@ describe("Google Antigravity OAuth upstream 401 replay", () => {
       const response = await postResponses(server);
       const body = await response.text();
 
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(403);
+      expect(JSON.parse(body)).toMatchObject({ error: {
+        type: "permission_error",
+        message: "OAuth account is paused. Resume it in account settings and retry.",
+      } });
       expect(body).toContain("OAuth account is paused");
       expect(observed.counts.refresh).toBe(0);
       expect(observed.requestPaths).toEqual(["/v1internal:generateContent"]);

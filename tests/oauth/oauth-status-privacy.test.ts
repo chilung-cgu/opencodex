@@ -269,7 +269,11 @@ describe("OAuth status privacy", () => {
     } as OcxConfig, { model: "", provider: "" });
     const body = await response.text();
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(403);
+    expect(JSON.parse(body)).toMatchObject({ error: {
+      type: "permission_error",
+      message: "OAuth account is paused. Resume it in account settings and retry.",
+    } });
     expect(body).toContain("OAuth account is paused");
     expect(body).not.toContain("login xai");
   });

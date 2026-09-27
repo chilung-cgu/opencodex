@@ -563,7 +563,7 @@ export default function ProviderAuthPanel({
                           <span className="pwi-auth-row-secondary faint">{t("pws.healthCooldownHint")}</span>
                         )}
                         {account.paused && (
-                          <span className="pwi-auth-row-secondary faint">{t("codexAuth.pausedHint")}</span>
+                          <span className="pwi-auth-row-secondary faint">{t("pws.accountPausedHint")}</span>
                         )}
                       </span>
                       {healthLabel && (
@@ -580,7 +580,7 @@ export default function ProviderAuthPanel({
                         type="button"
                         className="btn btn-ghost btn-sm"
                         aria-label={`${t(account.paused ? "codexAuth.resume" : "codexAuth.pause")} — ${label}`}
-                        title={account.paused ? t("codexAuth.pausedHint") : undefined}
+                        title={account.paused ? t("pws.accountPausedHint") : undefined}
                         aria-busy={pausing}
                         disabled={busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)}
                         onClick={() => void authHandlers.onPauseAccount(item.name, account, !account.paused)}

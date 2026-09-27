@@ -453,7 +453,7 @@ Pause or resume one account in the Codex pool or a generic OAuth provider pool, 
 generic OAuth accounts must be identified by id or a unique alias. A paused generic OAuth account
 is excluded from request selection, 429 failover, and proactive token refresh, and cannot be
 selected manually. Pausing the active account switches to the next usable account when one exists.
-If every account is paused, requests that need that pool return 503 until an account is resumed.
+If every account is paused, requests that need that pool return 403 until an account is resumed.
 
 For a generic OAuth provider, identify the account by id or by a unique exact or case-insensitive
 alias. The JSON response reports the account id, pause state, and active account id.

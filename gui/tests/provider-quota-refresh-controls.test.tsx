@@ -14,6 +14,7 @@ import { createRoot, type Root } from "react-dom/client";
 import ProviderUsage from "../src/components/provider-workspace/ProviderUsage";
 import ProviderAuthPanel from "../src/components/provider-workspace/ProviderAuthPanel";
 import { LanguageProvider } from "../src/i18n/provider";
+import { en } from "../src/i18n/en";
 import type { WorkspaceItem } from "../src/provider-workspace/catalog";
 import type { ProviderAuthHandlers } from "../src/components/provider-workspace/types";
 
@@ -191,6 +192,10 @@ test("generic OAuth accounts expose pause and resume controls", async () => {
   ]} authHandlers={handlers} />);
   const resume = findButton("Resume");
   expect(resume).not.toBeNull();
+  expect(resume!.getAttribute("title")).toBe(en["pws.accountPausedHint"]);
+  expect(host.textContent).toContain(en["pws.accountPausedHint"]);
+  expect(host.textContent).not.toContain(en["codexAuth.pausedHint"]);
+  expect(en["pws.accountPausedHint"]).not.toBe(en["codexAuth.pausedHint"]);
   await act(async () => { resume!.click(); });
   expect(calls[1]).toEqual({ provider: "google-antigravity", accountId: "ga-active", paused: false });
 });

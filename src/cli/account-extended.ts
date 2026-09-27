@@ -819,7 +819,7 @@ export async function cmdPause(args: string[], deps: AccountDeps, paused: boolea
         activeAccountId: response.json.activeAccountId }, null, 2));
     } else {
       console.log(`${name}: ${requestedId} ${paused ? "paused" : "resumed"}`);
-      if (paused && response.json.activeAccountChanged === true) {
+      if (response.json.activeAccountChanged === true) {
         console.error(`Active account changed to ${String(response.json.activeAccountId)}.`);
       }
     }

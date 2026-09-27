@@ -699,7 +699,7 @@ export async function prepareResponsesTransport(
         );
       }
       if (err instanceof OAuthAccountPausedError) {
-        return formatErrorResponse(503, "server_error", publicOAuthAuthenticationErrorMessage(err));
+        return formatErrorResponse(403, "permission_error", publicOAuthAuthenticationErrorMessage(err));
       }
       return formatErrorResponse(401, "authentication_error", publicOAuthAuthenticationErrorMessage(err));
     }

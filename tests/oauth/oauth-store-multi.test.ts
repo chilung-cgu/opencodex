@@ -626,12 +626,61 @@ describe("multi-account auth store", () => {
     expect(getAccountSet("xai")).toBeNull();
   });
 
+  test("removing the active account skips paused survivors when promoting", async () => {
+    await saveCredential("xai", cred({ accountId: "acct-a", access: "access-a" }));
+    await saveCredential("xai", cred({ accountId: "acct-b", access: "access-b" }));
+    await saveCredential("xai", cred({ accountId: "acct-c", access: "access-c" }));
+    const before = getAccountSet("xai")!;
+    const activeId = before.activeAccountId;
+    const survivors = before.accounts.filter(account => account.id !== activeId);
+    expect(survivors).toHaveLength(2);
+    await setAccountPaused("xai", survivors[0]!.id, true);
+
+    expect(await removeAccount("xai", activeId)).toBe(true);
+
+    const after = getAccountSet("xai")!;
+    expect(after.activeAccountId).toBe(survivors[1]!.id);
+    expect(after.accounts.find(account => account.id === after.activeAccountId)?.paused).not.toBe(true);
+  });
+
+  test("removing the active account retains a first survivor if every survivor is unusable", async () => {
+    await saveCredential("xai", cred({ accountId: "acct-a", access: "access-a" }));
+    await saveCredential("xai", cred({ accountId: "acct-b", access: "access-b" }));
+    const before = getAccountSet("xai")!;
+    const activeId = before.activeAccountId;
+    const survivorId = before.accounts.find(account => account.id !== activeId)!.id;
+    await setAccountPaused("xai", survivorId, true);
+
+    expect(await removeAccount("xai", activeId)).toBe(true);
+
+    expect(getAccountSet("xai")?.activeAccountId).toBe(survivorId);
+  });
+
   test("removeCredential removes only the active account", async () => {
     await saveCredential("anthropic", cred({ email: "a@example.com", accountId: "acct-a", access: "access-a" }));
     await saveCredential("anthropic", cred({ email: "b@example.com", accountId: "acct-b", access: "access-b" }));
     await removeCredential("anthropic"); // active is b
     expect(listAccounts("anthropic").length).toBe(1);
     expect(getCredential("anthropic")?.access).toBe("access-a");
+  });
+
+  test("removeCredential promotes the first usable survivor", async () => {
+    await saveCredential("xai", cred({ accountId: "logout-a", access: "access-a" }));
+    await saveCredential("xai", cred({ accountId: "logout-b", access: "access-b" }));
+    await saveCredential("xai", cred({ accountId: "logout-c", access: "access-c" }));
+    await saveCredential("xai", cred({ accountId: "logout-active", access: "access-active" }));
+    const before = getAccountSet("xai")!;
+    const survivors = before.accounts.filter(account => account.id !== before.activeAccountId);
+    await setAccountPaused("xai", survivors[0]!.id, true);
+    await markAccountNeedsReauth("xai", survivors[1]!.id, true);
+
+    expect(await removeCredential("xai")).toBe("removed");
+
+    const after = getAccountSet("xai")!;
+    expect(after.activeAccountId).toBe(survivors[2]!.id);
+    const survivor = after.accounts.find(account => account.id === after.activeAccountId);
+    expect(survivor?.paused).not.toBe(true);
+    expect(survivor?.needsReauth).not.toBe(true);
   });
 
   test("needsReauth flag persists and clears on fresh save", async () => {

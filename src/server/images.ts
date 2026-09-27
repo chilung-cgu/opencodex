@@ -276,7 +276,7 @@ async function tryCcaImageGeneration(
       return formatErrorResponse(504, "upstream_error", "CCA image generation timed out during authentication");
     }
     if (err instanceof OAuthAccountPausedError) {
-      return formatErrorResponse(503, "server_error", err.message);
+      return formatErrorResponse(403, "permission_error", err.message);
     }
     // Missing/revoked credential → 401 (re-login required); transient refresh/network → 502.
     const errName = err instanceof Error ? err.name : "";

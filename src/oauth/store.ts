@@ -1057,7 +1057,7 @@ export async function upsertCredentialByIdentity(
 }
 
 /**
- * Remove the ACTIVE account; remaining accounts promote the first one.
+ * Remove the ACTIVE account; promote the first usable survivor when available.
  *
  * Returns what actually happened, which a caller cannot otherwise know. A read-then-remove
  * preflight is not equivalent: `mutateStore` serializes mutations, so between a caller's
@@ -1074,7 +1074,8 @@ export async function removeCredential(provider: string): Promise<"removed" | "n
       delete store[provider];
       return "removed" as const;
     }
-    set.activeAccountId = set.accounts[0]!.id;
+    set.activeAccountId = set.accounts.find(account => account.paused !== true && account.needsReauth !== true)?.id
+      ?? set.accounts[0]!.id;
     return "removed" as const;
   }, [provider], { scrubLegacyBackup: result => result === "removed" ? [provider] : [] });
 }
@@ -1267,7 +1268,7 @@ export async function setAccountPaused(
   return result;
 }
 
-/** Remove one account by id; active removal promotes the first remaining account. */
+/** Remove one account by id; active removal promotes the first usable survivor when available. */
 export async function removeAccount(provider: string, accountId: string): Promise<boolean> {
   const removed = await mutateStore(store => {
     const set = store[provider];
@@ -1279,7 +1280,11 @@ export async function removeAccount(provider: string, accountId: string): Promis
       delete store[provider];
       return true;
     }
-    if (set.activeAccountId === accountId) set.activeAccountId = set.accounts[0]!.id;
+    if (set.activeAccountId === accountId) {
+      const next = set.accounts.find(account => account.paused !== true && account.needsReauth !== true)
+        ?? set.accounts[0]!;
+      set.activeAccountId = next.id;
+    }
     return true;
   }, [provider, accountId], { scrubLegacyBackup: removed => removed ? [provider] : [] });
   return removed;

@@ -75,6 +75,20 @@ describe("ocx account pause / resume", () => {
     expect(write?.body).toEqual({ provider: "google-antigravity", accountId: "acct_1", paused: true });
   });
 
+  test("generic OAuth resume reports when it changes the active account", async () => {
+    const calls: Captured[] = [];
+    const out = capture();
+    const base = deps(() => ({ json: { ok: true, activeAccountChanged: true, activeAccountId: "acct_2" } }), calls);
+    const genericDeps: AccountDeps = {
+      ...base,
+      loadConfigImpl: () => ({ providers: { "google-antigravity": { adapter: "google", baseUrl: "https://cloudcode-pa.googleapis.com", authMode: "oauth" } } }) as never,
+    };
+    try {
+      await cmdPause(["google-antigravity", "acct_1"], genericDeps, false);
+    } finally { out.restore(); }
+    expect(out.errors.join("\n")).toContain("Active account changed to acct_2.");
+  });
+
   test("pause PUTs the shared route with paused true", async () => {
     const calls: Captured[] = [];
     const out = capture();
