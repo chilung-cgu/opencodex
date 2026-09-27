@@ -2205,7 +2205,7 @@ export const fr: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} est de nouveau disponible dans le groupe",
   "codexAuth.pauseFailed": "Impossible de suspendre {email}. Aucune modification apportée.",
   "codexAuth.resumeFailed": "Impossible de réactiver {email}. Aucune modification apportée.",
-  "codexAuth.pausedHint": "Exclu du changement automatique, des nouvelles tentatives, de la récupération après délai et de la sélection manuelle jusqu’à sa réactivation.",
+  "codexAuth.pausedHint": "Exclu du choix automatique, des nouvelles tentatives, de la récupération après délai, de la sélection manuelle et du renouvellement proactif du jeton jusqu’à sa réactivation.",
   "codexAuth.pinned": "ÉPINGLÉ",
   "codexAuth.pinnedHint": "Vous avez sélectionné ce compte manuellement ; un ordre de sélection supérieur ne le remplacera donc pas. L’épinglage dure jusqu’à l’épuisement de ce compte, la sélection d’un autre compte ou la modification d’un ordre de sélection.",
   "codexAuth.fiveHour": "5 h",

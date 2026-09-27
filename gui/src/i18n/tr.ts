@@ -2229,7 +2229,7 @@ export const tr: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} tekrar havuza alındı",
   "codexAuth.pauseFailed": "{email} duraklatılamadı.",
   "codexAuth.resumeFailed": "{email} devam ettirilemedi.",
-  "codexAuth.pausedHint": "Devam ettirilene kadar otomatik seçimden hariç tutulur.",
+  "codexAuth.pausedHint": "Devam ettirilene kadar otomatik seçim, yeniden deneme, bekleme süresinden kurtarma, manuel seçim ve proaktif belirteç yenilemesinden hariç tutulur.",
   "codexAuth.pinned": "SABİTLENDİ",
   "codexAuth.pinnedHint": "Bu hesabı elle seçtiniz.",
   "codexAuth.fiveHour": "5saat",

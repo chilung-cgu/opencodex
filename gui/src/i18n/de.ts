@@ -1684,7 +1684,7 @@ export const de: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} ist wieder im Pool verfügbar",
   "codexAuth.pauseFailed": "{email} konnte nicht pausiert werden. Es wurde nichts geändert.",
   "codexAuth.resumeFailed": "{email} konnte nicht fortgesetzt werden. Es wurde nichts geändert.",
-  "codexAuth.pausedHint": "Bis zur Fortsetzung von automatischem Wechsel, Wiederholungen, Cooldown-Wiederherstellung und manueller Auswahl ausgeschlossen.",
+  "codexAuth.pausedHint": "Bis zur Wiederaufnahme von automatischer Auswahl, Wiederholungen, Cooldown-Wiederherstellung, manueller Auswahl und proaktiver Token-Erneuerung ausgeschlossen.",
   "codexAuth.pinned": "ANGEHEFTET",
   "codexAuth.pinnedHint": "Du hast dieses Konto von Hand ausgewählt, daher geht eine höhere Auswahlreihenfolge nicht daran vorbei. Die Fixierung gilt, bis dieses Konto aufgebraucht ist, du ein anderes auswählst oder du eine Auswahlreihenfolge änderst.",
   "codexAuth.fiveHour": "5 Std.",

@@ -2127,7 +2127,7 @@ export const ja: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} をアカウントプールに戻しました",
   "codexAuth.pauseFailed": "{email} を一時停止できませんでした。変更はありません。",
   "codexAuth.resumeFailed": "{email} を再開できませんでした。変更はありません。",
-  "codexAuth.pausedHint": "再開するまで、自動切り替え、再試行、クールダウン復旧、手動選択の対象外です。",
+  "codexAuth.pausedHint": "再開するまで、自動選択、再試行、クールダウン復旧、手動選択、トークンの事前更新の対象外です。",
   "codexAuth.pinned": "固定中",
   "codexAuth.pinnedHint": "手動で選択したアカウントなので、これより高い選択順序が先に使われることはありません。固定はこのアカウントを使い切るか、別のアカウントを選ぶか、いずれかの選択順序を変更するまで続きます。",
   "codexAuth.fiveHour": "5時間",

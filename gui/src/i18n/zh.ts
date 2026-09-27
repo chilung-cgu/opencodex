@@ -1701,7 +1701,7 @@ export const zh: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} 已重新加入账号池",
   "codexAuth.pauseFailed": "无法暂停 {email}，未做任何更改。",
   "codexAuth.resumeFailed": "无法恢复 {email}，未做任何更改。",
-  "codexAuth.pausedHint": "恢复前不会参与自动切换、重试、冷却恢复或手动选择。",
+  "codexAuth.pausedHint": "恢复前不会参与自动切换、重试、冷却恢复、手动选择或主动令牌刷新。",
   "codexAuth.pinned": "已固定",
   "codexAuth.pinnedHint": "这是你手动选择的账号，因此更高的选择顺序不会越过它。该固定会一直生效，直到此账号用尽、你改选其他账号，或你修改任一选择顺序。",
   "codexAuth.fiveHour": "5 小时",

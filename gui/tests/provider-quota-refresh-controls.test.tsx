@@ -171,6 +171,30 @@ test("the accounts surface omits the control when the page cannot force a read",
   expect(findButton("Refresh quotas")).toBeNull();
 });
 
+test("generic OAuth accounts expose pause and resume controls", async () => {
+  const calls: Array<{ provider: string; accountId: string; paused: boolean }> = [];
+  const handlers = authHandlers({
+    onPauseAccount: async (provider, row, paused) => { calls.push({ provider, accountId: row.id, paused }); },
+  });
+  const item = { ...oauthItem, name: "google-antigravity" };
+
+  await render(<ProviderAuthPanel item={item} apiBase="" accounts={[
+    { id: "ga-active", email: "a@example.test", active: true, paused: false },
+  ]} authHandlers={handlers} />);
+  const pause = findButton("Pause");
+  expect(pause).not.toBeNull();
+  await act(async () => { pause!.click(); });
+  expect(calls).toEqual([{ provider: "google-antigravity", accountId: "ga-active", paused: true }]);
+
+  await render(<ProviderAuthPanel item={item} apiBase="" accounts={[
+    { id: "ga-active", email: "a@example.test", active: true, paused: true },
+  ]} authHandlers={handlers} />);
+  const resume = findButton("Resume");
+  expect(resume).not.toBeNull();
+  await act(async () => { resume!.click(); });
+  expect(calls[1]).toEqual({ provider: "google-antigravity", accountId: "ga-active", paused: false });
+});
+
 test("API-key rows use independent shared credit readings and the same awaited refresh control", async () => {
   const { handler, settle } = deferredHandler();
   const credits = (remaining: number) => ({ updatedAt: Date.now() - 60_000,

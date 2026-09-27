@@ -1720,7 +1720,7 @@ export const ko: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} 계정을 풀에서 다시 사용할 수 있습니다",
   "codexAuth.pauseFailed": "{email} 계정을 일시 중지하지 못했습니다. 변경 사항이 없습니다.",
   "codexAuth.resumeFailed": "{email} 계정을 재개하지 못했습니다. 변경 사항이 없습니다.",
-  "codexAuth.pausedHint": "재개할 때까지 자동 전환, 재시도, 쿨다운 복구 및 수동 선택에서 제외됩니다.",
+  "codexAuth.pausedHint": "재개할 때까지 자동 선택, 재시도, 쿨다운 복구, 수동 선택 및 사전 토큰 갱신에서 제외됩니다.",
   "codexAuth.pinned": "고정됨",
   "codexAuth.pinnedHint": "직접 선택한 계정이므로 더 높은 선택 순서가 이 계정을 앞지르지 않습니다. 고정은 이 계정이 소진되거나, 다른 계정을 선택하거나, 어떤 계정이든 선택 순서를 변경할 때까지 유지됩니다.",
   "codexAuth.fiveHour": "5시간",

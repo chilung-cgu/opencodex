@@ -33,6 +33,7 @@ import {
   replaceProviderAccountSet,
   saveAccountCredential,
   saveCredential,
+  setAccountPaused,
   setAccountAlias,
   setActiveAccount,
   upsertCredentialByIdentity,
@@ -655,6 +656,33 @@ describe("multi-account auth store", () => {
     const set = getAccountSet("xai")!;
     expect(set.accounts.length).toBe(1);
     expect(set.activeAccountId).toBe("ok"); // dangling active healed
+  });
+
+  test("resuming an account repairs a dangling active pointer to a usable account", async () => {
+    const { idA, idB } = await selectionAccounts();
+    await setAccountPaused("xai", idA, true);
+    await setAccountPaused("xai", idB, true);
+    await mutateStore(store => { store.xai!.activeAccountId = "missing-account"; });
+
+    await setAccountPaused("xai", idB, false);
+
+    expect(getAccountSet("xai")?.activeAccountId).toBe(idB);
+    expect(getAccountSet("xai")?.accounts.find(account => account.id === idB)?.paused).toBeUndefined();
+  });
+
+  test("re-authenticating a paused account does not select it", async () => {
+    const { idA, idB } = await selectionAccounts();
+    await markAccountNeedsReauth("xai", idB, true);
+    await setAccountPaused("xai", idB, true);
+
+    await saveCredential("xai", cred({ accountId: "selection-b", access: "fresh-b" }));
+
+    const set = getAccountSet("xai")!;
+    const account = set.accounts.find(candidate => candidate.id === idB)!;
+    expect(set.activeAccountId).toBe(idA);
+    expect(account.credential.access).toBe("fresh-b");
+    expect(account.needsReauth).toBeUndefined();
+    expect(account.paused).toBe(true);
   });
 
   test("selection revision rejects an automatic promotion after manual A-B-A", async () => {

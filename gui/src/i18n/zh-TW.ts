@@ -1689,7 +1689,7 @@ export const zhTW: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} 已重新加入帳號池",
   "codexAuth.pauseFailed": "無法暫停 {email}，未做任何變更。",
   "codexAuth.resumeFailed": "無法恢復 {email}，未做任何變更。",
-  "codexAuth.pausedHint": "恢復前不會參與自動切換、重試、冷卻恢復或手動選擇。",
+  "codexAuth.pausedHint": "恢復前不會參與自動切換、重試、冷卻恢復、手動選擇或主動 Token 刷新。",
   "anthropicPool.title": "Claude 帳號池（實驗性）",
   "anthropicPool.enabledDesc": "會話固定在同一帳號；新會話優先使用{window}低於 {threshold}% 的帳號。",
   "anthropicPool.enabledNoProactiveDesc": "會話固定在同一帳號。門檻為 0 時停用主動的用量切換，但新工作階段選擇仍會使用 {window} 視窗。",

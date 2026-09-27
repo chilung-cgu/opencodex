@@ -2228,7 +2228,7 @@ export const vi: Record<TKey, string> = {
   "codexAuth.resumeSucceeded": "{email} đã có mặt lại trong pool",
   "codexAuth.pauseFailed": "Không thể ngưng {email}. Không có thay đổi nào.",
   "codexAuth.resumeFailed": "Không thể tiếp tục {email}. Không có thay đổi nào.",
-  "codexAuth.pausedHint": "Được loại trừ khỏi luân phiên tự động, thử lại, hồi phục sau thời gian chờ, và lựa chọn thủ công cho đến khi tiếp tục.",
+  "codexAuth.pausedHint": "Được loại trừ khỏi chọn tài khoản tự động, thử lại, hồi phục sau thời gian chờ, lựa chọn thủ công và làm mới token chủ động cho đến khi tiếp tục.",
   "codexAuth.pinned": "ĐÃ GHIM",
   "codexAuth.pinnedHint": "Bạn đã chọn tài khoản này bằng tay, nên một thứ tự ưu tiên cao hơn sẽ không bỏ qua nó. Việc ghim kéo dài đến khi tài khoản này bị cạn kiệt, bạn chọn một tài khoản khác, hoặc bạn thay đổi bất kỳ thứ tự lựa chọn nào.",
   "codexAuth.fiveHour": "5h",

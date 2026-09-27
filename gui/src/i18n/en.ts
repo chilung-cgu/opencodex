@@ -2273,7 +2273,7 @@ export const en = {
   "codexAuth.resumeSucceeded": "{email} is available to the pool again",
   "codexAuth.pauseFailed": "Could not pause {email}. Nothing was changed.",
   "codexAuth.resumeFailed": "Could not resume {email}. Nothing was changed.",
-  "codexAuth.pausedHint": "Excluded from automatic switching, retries, cooldown recovery, and manual selection until resumed.",
+  "codexAuth.pausedHint": "Excluded from automatic selection, retries, cooldown recovery, manual selection, and proactive token refresh until resumed.",
   "codexAuth.pinned": "PINNED",
   "codexAuth.pinnedHint": "You selected this account by hand, so a higher selection order will not move past it. The pin lasts until this account is drained, you select another, or you change any selection order.",
   "codexAuth.fiveHour": "5h",
