@@ -816,14 +816,14 @@ export async function executeResponsesRunTurn(
         // Preflight holds only heartbeats and the first meaningful event. A first-event 429 can be
         // replayed transparently; after any output reaches the bridge, a later error stays terminal.
         eventSource = await preflightRunTurnFailover(eventSource, wsFirstParsed, preflightDeadlineAt);
-        if (authRecoveryRefusal) {
-          cancelResponseCompletion();
-          runTurnAbort.abort();
-          queue.close();
-          cleanupRunTurnAbort();
-          releaseSearchProbeLease();
-          return authRecoveryRefusal;
-        }
+      }
+      if (authRecoveryRefusal) {
+        cancelResponseCompletion();
+        runTurnAbort.abort();
+        queue.close();
+        cleanupRunTurnAbort();
+        releaseSearchProbeLease();
+        return authRecoveryRefusal;
       }
       if (grokDevinPreflight) {
         const preflight = await preflightAdapterEvents(eventSource, undefined, {

@@ -720,12 +720,13 @@ export default function ProviderAuthPanel({
             {keys.length > 0 && (
               <ul className="pwi-auth-list">
                 {keys.map(entry => (
-                  <li key={entry.id} className={`pwi-auth-acct${entry.active ? " pwi-auth-acct--active" : ""}`}>
-                    <div className={`pwi-auth-row${entry.active ? " pwi-auth-row--active" : ""}`}>
+                  <li key={entry.id} className={`pwi-auth-acct${entry.active && !entry.disabled ? " pwi-auth-acct--active" : ""}`}>
+                    <div className={`pwi-auth-row${entry.active && !entry.disabled ? " pwi-auth-row--active" : ""}`}>
                     <button type="button" className="pwi-auth-row-main"
                       onClick={() => void authHandlers.onSwitchApiKey(item.name, entry)}
+                      aria-current={entry.active && !entry.disabled ? "true" : undefined}
                       disabled={(entry.active && !entry.disabled) || busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)} aria-label={entry.disabled ? `${t("pws.resumeAndActivateKey")} — ${entry.label ?? entry.masked}` : undefined}>
-                      <span className={`pwi-auth-dot ${entry.active ? "pwi-auth-dot--ok" : "pwi-auth-dot--off"}`} aria-hidden="true" />
+                      <span className={`pwi-auth-dot ${entry.active && !entry.disabled ? "pwi-auth-dot--ok" : "pwi-auth-dot--off"}`} aria-hidden="true" />
                       <span className="pwi-auth-row-copy">
                         <span className="pwi-auth-row-label">{entry.label ?? entry.masked}</span>
                         {entry.label && <code className="pwi-auth-row-secondary">{entry.masked} · {t("prov.accountId")}: {entry.id}</code>}
@@ -747,11 +748,13 @@ export default function ProviderAuthPanel({
                       </button>
                     )}
                     <button type="button" className="btn btn-ghost btn-sm"
+                      disabled={busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)}
                       onClick={() => void authHandlers.onEditAlias(item.name, "api-key", entry.id, entry.label)}>
                       {t("prov.editAlias")}
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm pwi-auth-row-remove"
                       aria-label={`${t("common.remove")} — ${entry.label ?? entry.masked}`}
+                      disabled={busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)}
                       title={`${t("common.remove")} — ${entry.label ?? entry.masked}`}
                       onClick={() => void authHandlers.onRemoveApiKey(item.name, entry)}>
                       <IconTrash style={{ width: 13, height: 13 }} aria-hidden="true" />

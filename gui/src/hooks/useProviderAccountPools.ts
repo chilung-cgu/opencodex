@@ -551,6 +551,9 @@ export function useProviderAccountPools(deps: {
 
   const switchApiKey = async (provider: string, entry: ApiKeyEntry) => {
     if (entry.active && !entry.disabled || switchingAccountRef.current.has(provider) || pausingAccountRef.current.has(provider) || selectionMutationsRef.current.has(`key:${provider}`)) return;
+    const target = { provider, accountId: entry.id };
+    switchingAccountRef.current.set(provider, target);
+    setSwitchingAccounts(current => ({ ...current, [provider]: target }));
     const key = invalidateSelectionReads(provider, "api-key");
     const mutation = Symbol();
     selectionMutationsRef.current.set(key, mutation);
@@ -580,6 +583,10 @@ export function useProviderAccountPools(deps: {
     } catch {
       if (currentMutation()) notify(t(resumed ? "prov.keyResumedSwitchFailed" : "prov.keySwitchFail"), false);
     } finally {
+      if (switchingAccountRef.current.get(provider) === target) {
+        switchingAccountRef.current.delete(provider);
+        if (aliveRef.current) setSwitchingAccounts(current => { const next = { ...current }; delete next[provider]; return next; });
+      }
       if (currentMutation()) {
         invalidateSelectionReads(provider, "api-key");
         selectionMutationsRef.current.delete(key);

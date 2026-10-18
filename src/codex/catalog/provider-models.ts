@@ -289,6 +289,9 @@ export async function fetchProviderModelsWithAuth(
       : { apiKey: await resolveModelsAuthToken(name, prov), observed: false }
     : resolveAuth.resolve(name, prov));
   const apiKey = auth.apiKey;
+  if ((prov.authMode === "oauth" && !apiKey) || isProviderApiKeyPaused(prov)) {
+    return observed(configured, "degraded");
+  }
   if (name === "github-copilot" && apiKey) {
     const transport = resolveGithubCopilotTransport({ ...prov, apiKey }, prov.authMode === "oauth"
       ? resolveCopilotApiBaseUrl(auth.oauthApiBaseUrl) : undefined);
@@ -637,12 +640,6 @@ export async function fetchProviderModelsWithAuth(
       ),
       "degraded",
     );
-  }
-  if ((prov.authMode === "oauth" && !apiKey) || isProviderApiKeyPaused(prov)) {
-    // No usable token (logged out, or account marked needsReauth). Still surface the
-    // configured static catalog so the GUI Models tab / rail counts are not empty —
-    // matching Cursor's !apiKey → configured degradation and fetch-failure fallback.
-    return observed(configured, "degraded");
   }
   const cloudCodeAssist = effectiveGoogleMode(name, prov) === "cloud-code-assist";
   const project = prov.project ?? auth.oauthProjectId;

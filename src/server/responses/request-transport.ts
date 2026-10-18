@@ -834,9 +834,6 @@ export async function prepareResponsesTransport(
         let nextAdapter: ProviderAdapter;
         try { nextAdapter = await refreshDispatchAdapter(requestParsed); }
         catch (error) {
-          if (error instanceof OAuthAccountPausedError) {
-            return formatErrorResponse(403, "permission_error", publicOAuthAuthenticationErrorMessage(error));
-          }
           if (error instanceof AdmissionModelDeniedError) throw error;
           const refusal = copilotRefusalResponse(error);
           if (refusal) return refusal;
