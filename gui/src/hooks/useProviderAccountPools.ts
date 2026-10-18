@@ -597,7 +597,6 @@ export function useProviderAccountPools(deps: {
 
   const pauseApiKey = async (provider: string, entry: ApiKeyEntry, paused: boolean) => {
     if (switchingAccountRef.current.has(provider) || pausingAccountRef.current.has(provider) || selectionMutationsRef.current.has(`key:${provider}`)) return;
-    const activeKeyMayChange = paused ? entry.active : !keyPools[provider]?.some(row => row.active && !row.disabled);
     const target = { provider, accountId: entry.id };
     pausingAccountRef.current.set(provider, target);
     setPausingAccounts(current => ({ ...current, [provider]: { ...target, paused } }));
@@ -661,7 +660,7 @@ export function useProviderAccountPools(deps: {
     notify(t(paused ? "codexAuth.pauseSucceeded" : "codexAuth.resumeSucceeded", { email: label }), true);
     try {
       const refreshed = await refreshAccountRosters({ provider, kind: "api-key" });
-      if (result.activeAccountChanged ?? activeKeyMayChange) await Promise.all([fetchConfig(), fetchProviderQuotas(true)]);
+      if (result.activeAccountChanged ?? true) await Promise.all([fetchConfig(), fetchProviderQuotas(true)]);
       if (!refreshed) notify(t("pws.accountsLoadFailed"), false);
     } catch {
       if (aliveRef.current && mountedRef.current) notify(t("pws.accountsLoadFailed"), false);

@@ -53,6 +53,18 @@ test("API-key pause JSON uses the same two-space indentation as the other pools"
   expect(result.writes).toEqual([{ name: "fixture", id: "key-1", paused: true }]);
 });
 
+test("API-key pause JSON infers the next active account when the active key is paused", async () => {
+  const result = await run("primary", {
+    json: true,
+    keys: [{ id: "key-1", label: "primary", active: true }, { id: "key-2", label: "backup" }],
+  });
+  expect(result.code).toBe(0);
+  expect(result.lines).toEqual([JSON.stringify({
+    ok: true, provider: "fixture", id: "key-1", paused: true,
+    activeAccountId: "key-2", activeAccountChanged: true,
+  }, null, 2)]);
+});
+
 test("the defensive pause usage fallback also names API-key pools", async () => {
   const source = await Bun.file(repoPath("src/cli/account-extended.ts")).text();
   const fallback = source.split("\n").find(line => line.includes("${verb} applies to"));
