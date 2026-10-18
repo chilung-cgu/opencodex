@@ -1,10 +1,13 @@
 import { googleVertexLocationConfigError } from "../providers/google-vertex-location";
+import { VERTEX_PROJECT_AUTO } from "./google-vertex-key-project";
 
 /**
  * Vertex endpoint selection, shared by inference and replay identity.
  *
  * API keys follow explicit provider configuration only: `provider.project` selects the project
  * endpoint (location defaults to `global`), otherwise the projectless express endpoint is used.
+ * `provider.project: "auto"` resolves the project of each key it sends (see
+ * google-vertex-key-project.ts), so one key pool may span several projects.
  * Ambient GOOGLE_CLOUD_PROJECT / GCLOUD_PROJECT / GOOGLE_CLOUD_LOCATION belong to ADC, so an
  * unrelated gcloud default in the shell cannot move an express-mode key onto another project.
  */
@@ -24,6 +27,10 @@ export function selectVertexEndpoint(
   if (hasApiKey) {
     if (!configuredProject) return { kind: "express" };
     return { kind: "project", project: configuredProject, location: provider.location || "global" };
+  }
+  // "auto" names a per-key lookup, never a project id; ADC has no key to resolve it from.
+  if (configuredProject === VERTEX_PROJECT_AUTO) {
+    throw new Error('Vertex AI project "auto" requires an API key; set provider.project to a project id for ADC.');
   }
   const project = configuredProject || env.GOOGLE_CLOUD_PROJECT || env.GCLOUD_PROJECT;
   if (!project) throw new Error("Vertex AI requires a project id (provider.project or GOOGLE_CLOUD_PROJECT/GCLOUD_PROJECT).");

@@ -995,6 +995,7 @@
     "google-tool-schema-contract.test.ts": "adapters/google",
     "google-tool-schema.test.ts": "adapters/google",
     "google-vertex-http.test.ts": "adapters/google",
+    "google-vertex-key-project.test.ts": "adapters/google",
     "google-vertex-stream.test.ts": "adapters/google",
     "google-vertex-thought-signature.test.ts": "adapters/google",
     "google-wire-compiler.test.ts": "adapters/google",

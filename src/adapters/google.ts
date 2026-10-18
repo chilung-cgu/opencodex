@@ -37,6 +37,7 @@ import {
 } from "./google-antigravity-replay";
 import { canonicalAntigravityUsageModel, resolveAntigravityEffortWireModel } from "../providers/antigravity-models";
 import { selectVertexEndpoint, vertexInferenceUrl, vertexReplayModelKey } from "./google-vertex-endpoint";
+import { resolveVertexApiKeyProject, VERTEX_PROJECT_AUTO } from "./google-vertex-key-project";
 import { forgetThoughtSignatureForReplay, lookupReplayThoughtSignature } from "../responses/thought-signature-replay";
 import {
   isTranslatorBudgetExceededError,
@@ -1206,7 +1207,12 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         reportToolSchemaLoss(compiled.toolSchemaLossReport);
         restoreGoogleToolName = compiled.restoreToolName;
         const apiKey = resolveVertexApiKey(provider.apiKey);
-        const vertexEndpoint = selectVertexEndpoint(provider, Boolean(apiKey));
+        let vertexEndpoint = selectVertexEndpoint(provider, Boolean(apiKey));
+        if (apiKey && vertexEndpoint.kind === "project" && vertexEndpoint.project === VERTEX_PROJECT_AUTO) {
+          // Unresolved keys use express for this request so Google's status drives key failover.
+          const project = await resolveVertexApiKeyProject(apiKey);
+          vertexEndpoint = project ? { ...vertexEndpoint, project } : { kind: "express" };
+        }
         const url = vertexInferenceUrl(vertexEndpoint, parsed.modelId, method, streamParam);
         vertexReplayModel = vertexReplayModelKey(vertexEndpoint, parsed.modelId);
         vertexReplaySession = vertexReplaySessionId(parsed);
