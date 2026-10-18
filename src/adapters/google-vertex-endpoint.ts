@@ -23,7 +23,8 @@ export function selectVertexEndpoint(
   env: NodeJS.ProcessEnv = process.env,
 ): VertexEndpointSelection {
   // A blank or whitespace-only project is unset: it must not select a /projects/%20/ endpoint.
-  const configuredProject = provider.project?.trim() || undefined;
+  const rawProject = provider.project?.trim() || undefined;
+  const configuredProject = rawProject?.toLowerCase() === VERTEX_PROJECT_AUTO ? VERTEX_PROJECT_AUTO : rawProject;
   if (hasApiKey) {
     if (!configuredProject) return { kind: "express" };
     return { kind: "project", project: configuredProject, location: provider.location || "global" };

@@ -49,7 +49,10 @@ async function probe(apiKey: string, fetchImpl: typeof fetch): Promise<string | 
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     // Only Google's model NOT_FOUND names the key's project; 401/403/429 and redirects do not.
-    if (res.status !== 404) return undefined;
+    if (res.status !== 404) {
+      void res.body?.cancel().catch(() => {});
+      return undefined;
+    }
     return parseVertexProbeProjectNumber(await res.text());
   } catch {
     return undefined;

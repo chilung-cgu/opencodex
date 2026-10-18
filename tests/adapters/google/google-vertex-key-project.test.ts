@@ -131,6 +131,21 @@ describe("vertex project auto", () => {
     expect(probes).toEqual([]);
   });
 
+  test("accepts case-insensitive AUTO and honors a provider-scoped fetch", async () => {
+    let customCalls = 0;
+    const customFetch = (async () => {
+      customCalls++;
+      return new Response(notFound("333333333333"), { status: 404 });
+    }) as unknown as typeof fetch;
+    const req = await createGoogleAdapter({
+      ...vertex("key-c", { project: "  Auto " }),
+      fetch: customFetch,
+    } as OcxProviderConfig).buildRequest(parsed());
+    expect(req.url).toContain("/projects/333333333333/locations/global/");
+    expect(customCalls).toBe(1);
+    expect(probes).toEqual([]);
+  });
+
   test("ADC rejects auto instead of treating it as a project id", async () => {
     const adc = { adapter: "google", baseUrl: "https://aiplatform.googleapis.com", googleMode: "vertex", project: "auto", location: "global" } as OcxProviderConfig;
     const prevKey = process.env.GOOGLE_CLOUD_API_KEY;

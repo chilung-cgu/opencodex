@@ -1210,7 +1210,8 @@ export function createGoogleAdapter(provider: OcxProviderConfig): ProviderAdapte
         let vertexEndpoint = selectVertexEndpoint(provider, Boolean(apiKey));
         if (apiKey && vertexEndpoint.kind === "project" && vertexEndpoint.project === VERTEX_PROJECT_AUTO) {
           // Unresolved keys use express for this request so Google's status drives key failover.
-          const project = await resolveVertexApiKeyProject(apiKey);
+          const customFetch = (provider as OcxProviderConfig & { fetch?: typeof globalThis.fetch }).fetch;
+          const project = await resolveVertexApiKeyProject(apiKey, customFetch);
           vertexEndpoint = project ? { ...vertexEndpoint, project } : { kind: "express" };
         }
         const url = vertexInferenceUrl(vertexEndpoint, parsed.modelId, method, streamParam);
