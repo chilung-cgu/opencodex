@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 /**
  * Per-key project discovery for Vertex express-mode API keys (`provider.project: "auto"`).
  *
@@ -25,7 +23,7 @@ const resolved = new Map<string, string>();
 const inflight = new Map<string, Promise<string | undefined>>();
 
 function cacheKey(apiKey: string): string {
-  return createHash("sha256").update(apiKey).digest("base64url");
+  return new Bun.CryptoHasher("sha256").update(apiKey).digest("base64url");
 }
 
 function remember(key: string, project: string): void {
