@@ -1323,7 +1323,7 @@ export function safeConfigDTO(config: OcxConfig): unknown {
   for (const [name, provider] of Object.entries(config.providers)) {
     const dto: Record<string, unknown> = {
       ...editor.providers[name],
-      hasApiKey: !!provider.apiKey,
+      hasApiKey: !!provider.apiKey || (provider.authMode !== "oauth" && provider.authMode !== "forward" && (provider.apiKeyPool?.length ?? 0) > 0),
       hasHeaders: !!provider.headers && Object.keys(provider.headers).length > 0,
     };
     if (name === "xai") {

@@ -247,3 +247,23 @@ test.each(["http", "transport"])("a resumed key reports partial success when act
   expect(notices.some(notice => notice.key === "prov.keySwitchFail")).toBe(false);
   expect(pools.keyPools.fixture[0]?.disabled).toBe(false);
 });
+
+test("pauseApiKey pauses active key with ring-order fallback and refreshes roster", async () => {
+  const k1 = { id: "k1", label: "Key 1", masked: "****1", active: false, disabled: false };
+  const k2 = { id: "k2", label: "Key 2", masked: "****2", active: true, disabled: false };
+  const k3 = { id: "k3", label: "Key 3", masked: "****3", active: false, disabled: false };
+  const writes: Array<{ path: string; body: unknown }> = [];
+  respond = async (url, init) => {
+    if (init?.method === "PUT") {
+      writes.push({ path: url, body: JSON.parse(String(init.body)) });
+      return Response.json({ ok: true, activeId: "k3", activeAccountChanged: true });
+    }
+    return Response.json({ activeId: "k3", keys: [k1, { ...k2, active: false, disabled: true }, { ...k3, active: true }] });
+  };
+  await act(async () => { pools.setKeyPools({ fixture: [k1, k2, k3] }); });
+  await act(async () => { await pools.pauseApiKey("fixture", k2, true); });
+  expect(writes).toEqual([{ path: "/pause-hook/api/providers/keys/pause", body: { name: "fixture", id: "k2", paused: true } }]);
+  expect(pools.keyPools.fixture.find(r => r.id === "k2")?.disabled).toBe(true);
+  expect(pools.keyPools.fixture.find(r => r.id === "k3")?.active).toBe(true);
+  expect(notices).toContainEqual({ key: "codexAuth.pauseSucceeded", ok: true });
+});

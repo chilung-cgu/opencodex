@@ -458,8 +458,8 @@ export class OAuthLoginRequiredError extends Error {
 
 /** An operator-paused account is temporarily unavailable, not an invalid login. */
 export class OAuthAccountPausedError extends Error {
-  constructor() {
-    super("OAuth account is paused. Resume it in account settings and retry.");
+  constructor(message = "OAuth account is paused. Resume it in account settings and retry.") {
+    super(message);
     this.name = "OAuthAccountPausedError";
   }
 }

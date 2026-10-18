@@ -848,7 +848,14 @@ export async function cmdPause(args: string[], deps: AccountDeps, paused: boolea
     const result = await apiJson(deps, baseUrl, "PUT", "/api/providers/keys/pause", { name, id: target.id, paused });
     if (result.status === 0) return proxyUnreachable(result.transportError);
     if (result.status !== 200) return apiError(result.json, `failed to ${verb} account`, result.status);
-    console.log(wantsJson ? JSON.stringify({ ok: true, provider: name, id: target.id, paused }, null, 2) : `${name}: account ${paused ? "paused" : "resumed"}`);
+    if (wantsJson) {
+      console.log(JSON.stringify({ ok: true, provider: name, id: target.id, paused }, null, 2));
+    } else {
+      console.log(`${name}: account ${paused ? "paused" : "resumed"}`);
+      if (result.json.activeAccountChanged === true) {
+        console.error(`Active account changed to ${String(result.json.activeAccountId ?? result.json.activeId ?? "none")}.`);
+      }
+    }
     return 0;
   }
   if (classified.type !== "codex") {

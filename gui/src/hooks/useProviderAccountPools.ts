@@ -550,7 +550,7 @@ export function useProviderAccountPools(deps: {
   };
 
   const switchApiKey = async (provider: string, entry: ApiKeyEntry) => {
-    if (entry.active && !entry.disabled || selectionMutationsRef.current.has(`key:${provider}`)) return;
+    if (entry.active && !entry.disabled || switchingAccountRef.current.has(provider) || pausingAccountRef.current.has(provider) || selectionMutationsRef.current.has(`key:${provider}`)) return;
     const key = invalidateSelectionReads(provider, "api-key");
     const mutation = Symbol();
     selectionMutationsRef.current.set(key, mutation);
@@ -585,6 +585,78 @@ export function useProviderAccountPools(deps: {
         selectionMutationsRef.current.delete(key);
         void refreshAccountRosters({ provider, kind: "api-key" });
       }
+    }
+  };
+
+  const pauseApiKey = async (provider: string, entry: ApiKeyEntry, paused: boolean) => {
+    if (switchingAccountRef.current.has(provider) || pausingAccountRef.current.has(provider) || selectionMutationsRef.current.has(`key:${provider}`)) return;
+    const target = { provider, accountId: entry.id };
+    pausingAccountRef.current.set(provider, target);
+    setPausingAccounts(current => ({ ...current, [provider]: { ...target, paused } }));
+    const key = invalidateSelectionReads(provider, "api-key");
+    const mutation = Symbol();
+    selectionMutationsRef.current.set(key, mutation);
+    const currentMutation = () => aliveRef.current && mountedRef.current && serverRef.current === apiBase
+      && selectionMutationsRef.current.get(key) === mutation;
+    const label = entry.label ?? entry.masked;
+    let result: { activeId?: string | null; activeAccountId?: string | null; activeAccountChanged?: boolean };
+    try {
+      const res = await fetch(`${apiBase}/api/providers/keys/pause`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: provider, id: entry.id, paused }),
+      });
+      if (!currentMutation()) return;
+      if (!res.ok) {
+        notify(t(paused ? "codexAuth.pauseFailed" : "codexAuth.resumeFailed", { email: label }), false);
+        return;
+      }
+      result = await res.json().catch(() => ({})) as { activeId?: string | null; activeAccountId?: string | null; activeAccountChanged?: boolean };
+      if (!currentMutation()) return;
+      invalidateSelectionReads(provider, "api-key");
+      setKeyPools(current => {
+        const existing = current[provider];
+        if (!existing) return current;
+        const rows = existing.map(row => row.id === entry.id
+          ? { ...row, disabled: paused, ...(paused ? {} : { pauseDetails: undefined }) }
+          : row);
+        const idx = rows.findIndex(row => row.id === entry.id);
+        const ordered = idx >= 0 ? [...rows.slice(idx + 1), ...rows.slice(0, idx)] : rows;
+        const fallbackSelected = paused && entry.active
+          ? ordered.find(row => !row.disabled)?.id ?? null
+          : !paused && !rows.some(row => row.active && !row.disabled)
+            ? entry.id
+            : rows.find(row => row.active)?.id ?? null;
+        const selected = result.activeId !== undefined
+          ? result.activeId
+          : result.activeAccountId !== undefined
+            ? result.activeAccountId
+            : fallbackSelected;
+        return { ...current, [provider]: selectionRows(rows, selected) };
+      });
+      selectionMutationsRef.current.delete(key);
+    } catch {
+      if (currentMutation()) notify(t(paused ? "codexAuth.pauseFailed" : "codexAuth.resumeFailed", { email: label }), false);
+      return;
+    } finally {
+      if (currentMutation()) {
+        invalidateSelectionReads(provider, "api-key");
+        selectionMutationsRef.current.delete(key);
+        void refreshAccountRosters({ provider, kind: "api-key" });
+      }
+      if (pausingAccountRef.current.get(provider) === target) {
+        pausingAccountRef.current.delete(provider);
+        if (aliveRef.current) setPausingAccounts(current => { const next = { ...current }; delete next[provider]; return next; });
+      }
+    }
+    if (!aliveRef.current || !mountedRef.current || serverRef.current !== apiBase) return;
+    notify(t(paused ? "codexAuth.pauseSucceeded" : "codexAuth.resumeSucceeded", { email: label }), true);
+    try {
+      const refreshed = await refreshAccountRosters({ provider, kind: "api-key" });
+      if (result.activeAccountChanged) await Promise.all([fetchConfig(), fetchProviderQuotas(true)]);
+      if (!refreshed) notify(t("pws.accountsLoadFailed"), false);
+    } catch {
+      if (aliveRef.current && mountedRef.current) notify(t("pws.accountsLoadFailed"), false);
     }
   };
 
@@ -712,7 +784,7 @@ export function useProviderAccountPools(deps: {
   return {
     accountSets, accountLoadStates, switchingAccount, pausingAccount, switchingAccounts, pausingAccounts, openAccounts, keyPools, addingKeyFor, newKeyValue,
     setAccountSets, setAccountLoadStates, setSwitchingAccount, setOpenAccounts, setKeyPools, setAddingKeyFor, setNewKeyValue,
-    fetchAccountSets, fetchKeyPools, refreshAccountRosters, switchAccount, pauseAccount, setAccountPoolThreshold, setAccountThreshold, switchApiKey, removeApiKey, addApiKeyValue, addApiKey, editCredentialAlias, removeAccount,
+      fetchAccountSets, fetchKeyPools, refreshAccountRosters, switchAccount, pauseAccount, setAccountPoolThreshold, setAccountThreshold, switchApiKey, pauseApiKey, removeApiKey, addApiKeyValue, addApiKey, editCredentialAlias, removeAccount,
     oauthCardProviders, keyCardProviders, activeAccountNeedsReauth,
   };
 }

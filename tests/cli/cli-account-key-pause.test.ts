@@ -58,3 +58,24 @@ test("the defensive pause usage fallback also names API-key pools", async () => 
   const fallback = source.split("\n").find(line => line.includes("${verb} applies to"));
   expect(fallback).toContain('applies to the openai Codex account pool, a generic OAuth provider, or an API-key pool');
 });
+
+test("API-key pause prints active account handoff notice on stderr when activeAccountChanged is true", async () => {
+  const lines: string[] = [], errors: string[] = [];
+  const log = console.log, error = console.error;
+  console.log = value => { lines.push(String(value)); };
+  console.error = value => { errors.push(String(value)); };
+  const deps: AccountDeps = {
+    baseUrl: "http://127.0.0.1:10100",
+    loadConfigImpl: () => ({ providers: { "google-vertex": { adapter: "google", authMode: "key" } } }) as never,
+    fetchImpl: (async (_url, init) => {
+      if (init?.method === "PUT") return Response.json({ ok: true, activeId: "key-2", activeAccountId: "key-2", activeAccountChanged: true });
+      return Response.json({ keys: [{ id: "key-1", label: "primary" }, { id: "key-2", label: "backup" }] });
+    }) as typeof fetch,
+  };
+  try {
+    const code = await cmdPause(["google-vertex", "primary"], deps, true);
+    expect(code).toBe(0);
+    expect(lines).toEqual(["google-vertex: account paused"]);
+    expect(errors).toEqual(["Active account changed to key-2."]);
+  } finally { console.log = log; console.error = error; }
+});

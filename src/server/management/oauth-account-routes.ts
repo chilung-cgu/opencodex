@@ -1121,9 +1121,28 @@ export async function handleOauthAccountRoutes(ctx: ManagementContext): Promise<
     if (!isPlainRecord(body)) return jsonResponse({ error: "body must be an object" }, 400);
     if (typeof body.name !== "string" || typeof body.id !== "string" || typeof body.paused !== "boolean") return jsonResponse({ error: "name, id and paused required" }, 400);
     if (!isValidProviderName(body.name) || !hasOwnProvider(config.providers, body.name)) return jsonResponse({ error: "unknown provider" }, 404);
+    const { listProviderApiKeys } = await import("../../providers/api-keys");
+    const beforeActiveId = listProviderApiKeys(config, body.name).activeId;
     const { setProviderApiKeyPaused } = await import("../../providers/api-key-pause");
-    return setProviderApiKeyPaused(config, body.name, body.id, body.paused)
-      ? jsonResponse({ ok: true }) : jsonResponse({ error: "key not found" }, 404);
+    if (!setProviderApiKeyPaused(config, body.name, body.id, body.paused)) {
+      return jsonResponse({ error: "key not found" }, 404);
+    }
+    const activeId = listProviderApiKeys(config, body.name).activeId;
+    const activeAccountChanged = beforeActiveId !== activeId;
+    const { clearKeyCooldowns, forgetApiKeyRotationCursor } = await import("../../providers/key-failover");
+    clearKeyCooldowns(body.name);
+    forgetApiKeyRotationCursor(body.name);
+    if (activeAccountChanged) {
+      const { clearModelCache } = await import("../../codex/model-cache");
+      clearModelCache(body.name);
+      clearProviderQuotaCacheFor(body.name);
+    }
+    return jsonResponse({
+      ok: true,
+      activeId,
+      activeAccountId: activeId,
+      activeAccountChanged,
+    });
   }
   if (url.pathname === "/api/providers/keys/active" && req.method === "PUT") {
     const body = await readManagementJsonBodyOr(req, {}) as { name?: string; id?: string };
@@ -1131,7 +1150,12 @@ export async function handleOauthAccountRoutes(ctx: ManagementContext): Promise<
     if (!name || !isValidProviderName(name) || !hasOwnProvider(config.providers, name)) return jsonResponse({ error: "unknown provider" }, 404);
     if (!body.id) return jsonResponse({ error: "missing id" }, 400);
     const { setActiveProviderApiKey } = await import("../../providers/api-keys");
-    if (!setActiveProviderApiKey(config, name, body.id)) return jsonResponse({ error: "key not found" }, 404);
+    if (!setActiveProviderApiKey(config, name, body.id)) {
+      if (config.providers[name]?.apiKeyPool?.some(e => e.id === body.id && e.disabled)) {
+        return jsonResponse({ error: "API key is paused; resume it first" }, 409);
+      }
+      return jsonResponse({ error: "key not found" }, 404);
+    }
     const { clearModelCache } = await import("../../codex/model-cache");
     clearModelCache(name);
     const { clearProviderQuotaCache } = await import("../../providers/quota");
