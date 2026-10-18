@@ -24,7 +24,7 @@ key belongs to one project, and Google's projectless NOT_FOUND names it (probed 
 five express keys; undocumented error text, not a stable discovery API), so
 `src/adapters/google-vertex-key-project.ts` sends one countTokens call for a nonexistent model to
 the fixed `aiplatform.googleapis.com` authority (manual redirects, 10 s timeout) through the
-request's selected transport (`IncomingMeta.providerFetch` or the provider's configured egress)
+provider's configured egress (`provider.fetch` or `configuredOutboundFetch` with `providerEgressSendInit`)
 and reads the 404 body through `readBoundedResponseBody` with a 4 KiB ceiling and UTF-8 check.
 Results are cached per key digest in an insertion-order LRU of 64 entries; concurrent first
 requests share one probe, and a caller abort detaches only that waiter unless every waiter has

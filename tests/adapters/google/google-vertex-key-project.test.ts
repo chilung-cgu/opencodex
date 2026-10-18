@@ -173,18 +173,18 @@ describe("vertex project auto", () => {
     expect(project).toBeUndefined();
   });
 
-  test("uses IncomingMeta.providerFetch and provider.proxy egress for the discovery probe", async () => {
-    let providerFetchCalls = 0;
-    const injectedFetch = (async () => {
-      providerFetchCalls++;
+  test("uses provider egress without consuming IncomingMeta.providerFetch admission hooks", async () => {
+    let admissionHookCalls = 0;
+    const admissionBoundFetch = (async () => {
+      admissionHookCalls++;
       return new Response(notFound("444444444444"), { status: 404 });
     }) as unknown as typeof fetch;
 
-    const viaIncoming = await createGoogleAdapter(vertex("key-incoming"))
-      .buildRequest(parsed(), incoming({ providerFetch: injectedFetch }));
-    expect(viaIncoming.url).toContain("/projects/444444444444/locations/global/");
-    expect(providerFetchCalls).toBe(1);
-    expect(probes).toEqual([]);
+    const viaProvider = await createGoogleAdapter(vertex("key-a"))
+      .buildRequest(parsed(), incoming({ providerFetch: admissionBoundFetch }));
+    expect(viaProvider.url).toContain("/projects/111111111111/locations/global/");
+    expect(admissionHookCalls).toBe(0);
+    expect(probes).toHaveLength(1);
 
     // When IncomingMeta omits providerFetch, the adapter synthesizes the provider's configured proxy route.
     let capturedProxy: string | false | undefined;

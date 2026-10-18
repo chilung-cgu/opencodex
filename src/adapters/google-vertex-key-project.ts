@@ -41,10 +41,12 @@ interface InflightProbe {
 
 const inflight = new Map<string, InflightProbe>();
 
+/** Computes the non-reversible SHA-256 cache key for an API key. */
 function cacheKey(apiKey: string): string {
   return new Bun.CryptoHasher("sha256").update(apiKey).digest("base64url");
 }
 
+/** Records a resolved project number in the bounded insertion-order LRU cache. */
 function remember(key: string, project: string): void {
   resolved.delete(key);
   resolved.set(key, project);
@@ -69,6 +71,7 @@ const defaultOutboundFetch = markEgressTransparentExecutor(
   ((input: Parameters<typeof fetch>[0], init?: RequestInit) => configuredOutboundFetch(input, init)) as typeof fetch,
 );
 
+/** Builds the side-effect-free outbound transport honoring provider egress and HTTP version. */
 function selectProbeFetch(options: VertexKeyProjectOptions): typeof fetch {
   if (options.fetch) return options.fetch;
   const provider = options.provider;
@@ -83,6 +86,7 @@ function selectProbeFetch(options: VertexKeyProjectOptions): typeof fetch {
   }) as typeof fetch;
 }
 
+/** Sends one bounded countTokens probe to Google and extracts the project number from a 404 body. */
 async function probe(
   apiKey: string,
   fetchImpl: typeof fetch,
@@ -120,12 +124,14 @@ async function probe(
   }
 }
 
+/** Detaches the abort listener registered for a coalesced probe waiter. */
 function cleanupWaiter(waiter: ProbeWaiter): void {
   if (waiter.signal && waiter.onAbort) {
     waiter.signal.removeEventListener("abort", waiter.onAbort);
   }
 }
 
+/** Starts a shared in-flight probe and fans the result out to all active waiters. */
 function startInflight(
   key: string,
   apiKey: string,
@@ -209,6 +215,7 @@ export async function resolveVertexApiKeyProject(
   });
 }
 
+/** Clears the resolved project cache and aborts any in-flight probes for tests. */
 export function __resetVertexApiKeyProjectCache(): void {
   resolved.clear();
   for (const entry of inflight.values()) entry.controller.abort();
