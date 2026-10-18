@@ -641,6 +641,8 @@ export async function prepareResponsesTransport(
         if (fresh) current = selectProactiveApiKeyTransport(config, route.providerName, fresh) ?? fresh;
       }
       if (!current) {
+        // Rethrown through oauthDispatch so adapter-dispatch / passthrough-dispatch map it
+        // as a local 403 admission refusal without charging an upstream send.
         if (isProviderApiKeyPaused(config.providers[route.providerName])) throw new ProviderApiKeyPausedError();
         throw new Error("API key selection is unavailable before dispatch");
       }
@@ -832,6 +834,9 @@ export async function prepareResponsesTransport(
         let nextAdapter: ProviderAdapter;
         try { nextAdapter = await refreshDispatchAdapter(requestParsed); }
         catch (error) {
+          if (error instanceof OAuthAccountPausedError) {
+            return formatErrorResponse(403, "permission_error", publicOAuthAuthenticationErrorMessage(error));
+          }
           if (error instanceof AdmissionModelDeniedError) throw error;
           const refusal = copilotRefusalResponse(error);
           if (refusal) return refusal;

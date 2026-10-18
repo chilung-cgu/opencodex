@@ -48,7 +48,7 @@ test.each(["fr", "ko"] as const)("provider OAuth and key tooltips use the app lo
       expect(win.document.querySelector(".badge-muted[title]")?.getAttribute("title")).toBe(expected);
       if (authMode === "key") {
         expect(win.document.querySelector(".pwi-auth-row-main")?.getAttribute("aria-label"))
-          .toBe(`${t("codexAuth.resume")} — Reserve key`);
+          .toBe(`${t("pws.resumeAndActivateKey")} — Reserve key`);
       }
     } finally { void win.happyDOM.close(); }
   }
@@ -68,6 +68,7 @@ test("API-key pool rows render dedicated Pause and Resume buttons when onPauseAp
     const buttons = Array.from(win.document.querySelectorAll("button")).map(btn => btn.getAttribute("aria-label")).filter(Boolean);
     expect(buttons).toContain(`${t("codexAuth.pause")} — Primary Vertex`);
     expect(buttons).toContain(`${t("codexAuth.resume")} — Backup Vertex`);
+    expect(buttons).toContain(`${t("pws.resumeAndActivateKey")} — Backup Vertex`);
     expect(win.document.body.textContent).toContain(t("pws.accountPausedHint"));
   } finally { void win.happyDOM.close(); }
 });

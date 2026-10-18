@@ -49,7 +49,7 @@ test("a failed pause transport reports an unreachable proxy and its cause", asyn
 test("API-key pause JSON uses the same two-space indentation as the other pools", async () => {
   const result = await run("reserve", { json: true });
   expect(result.code).toBe(0);
-  expect(result.lines).toEqual([JSON.stringify({ ok: true, provider: "fixture", id: "key-1", paused: true }, null, 2)]);
+  expect(result.lines).toEqual([JSON.stringify({ ok: true, provider: "fixture", id: "key-1", paused: true, activeAccountId: null, activeAccountChanged: false }, null, 2)]);
   expect(result.writes).toEqual([{ name: "fixture", id: "key-1", paused: true }]);
 });
 

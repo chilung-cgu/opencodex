@@ -204,6 +204,10 @@ export function sanitizeApiKeyValue(value: unknown): string | undefined {
 }
 
 /** Seed the pool from a legacy bare `apiKey`, and keep `apiKey` mirrored to the active entry. */
+export function providerHasStoredApiKey(provider: OcxProviderConfig): boolean {
+  return !!provider.apiKey || (isKeyAuthProvider(provider) && (provider.apiKeyPool?.length ?? 0) > 0);
+}
+
 function ensurePool(provider: OcxProviderConfig): NonNullable<OcxProviderConfig["apiKeyPool"]> {
   if (!provider.apiKeyPool) provider.apiKeyPool = [];
   if (provider.apiKeyPool.length === 0 && provider.apiKey) {

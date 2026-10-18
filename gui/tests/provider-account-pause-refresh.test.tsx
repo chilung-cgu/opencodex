@@ -14,6 +14,8 @@ let pools: ReturnType<typeof useProviderAccountPools>;
 let notices: Array<{ key: string; ok: boolean }>;
 let respond: (url: string, init?: RequestInit) => Promise<Response>;
 let fetchOauth: () => Promise<void>;
+let fetchConfig: () => Promise<void>;
+let fetchProviderQuotas: (refresh?: boolean) => Promise<void>;
 
 const row = (id: string, active: boolean, paused = false): OAuthAccount => ({ id, email: `${id}@example.test`, active, paused });
 
@@ -21,7 +23,7 @@ function Harness() {
   const aliveRef = useRef(true);
   const current = useProviderAccountPools({ apiBase: "/pause-hook", config: null, aliveRef, t: key => key,
     oauthStatus: {}, notify: (key: string, ok: boolean) => { notices.push({ key, ok }); },
-    fetchConfig: async () => {}, fetchOauth: () => fetchOauth(), fetchProviderQuotas: async () => {},
+    fetchConfig: () => fetchConfig(), fetchOauth: () => fetchOauth(), fetchProviderQuotas: refresh => fetchProviderQuotas(refresh),
     codexActiveNeedsReauth: false });
   useLayoutEffect(() => { pools = current; }, [current]);
   return null;
@@ -37,6 +39,8 @@ beforeEach(async () => {
   });
   notices = [];
   fetchOauth = async () => {};
+  fetchConfig = async () => {};
+  fetchProviderQuotas = async () => {};
   const host = win.document.createElement("div");
   win.document.body.appendChild(host);
   await act(async () => { root = createRoot(host as unknown as HTMLElement); root.render(<Harness />); });
@@ -253,10 +257,14 @@ test("pauseApiKey pauses active key with ring-order fallback and refreshes roste
   const k2 = { id: "k2", label: "Key 2", masked: "****2", active: true, disabled: false };
   const k3 = { id: "k3", label: "Key 3", masked: "****3", active: false, disabled: false };
   const writes: Array<{ path: string; body: unknown }> = [];
+  let configRefreshes = 0;
+  const quotaRefreshes: boolean[] = [];
+  fetchConfig = async () => { configRefreshes++; };
+  fetchProviderQuotas = async refresh => { quotaRefreshes.push(refresh === true); };
   respond = async (url, init) => {
     if (init?.method === "PUT") {
       writes.push({ path: url, body: JSON.parse(String(init.body)) });
-      return Response.json({ ok: true, activeId: "k3", activeAccountChanged: true });
+      return Response.json({ ok: true });
     }
     return Response.json({ activeId: "k3", keys: [k1, { ...k2, active: false, disabled: true }, { ...k3, active: true }] });
   };
@@ -266,4 +274,6 @@ test("pauseApiKey pauses active key with ring-order fallback and refreshes roste
   expect(pools.keyPools.fixture.find(r => r.id === "k2")?.disabled).toBe(true);
   expect(pools.keyPools.fixture.find(r => r.id === "k3")?.active).toBe(true);
   expect(notices).toContainEqual({ key: "codexAuth.pauseSucceeded", ok: true });
+  expect(configRefreshes).toBe(1);
+  expect(quotaRefreshes).toEqual([true]);
 });

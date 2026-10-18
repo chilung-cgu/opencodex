@@ -724,7 +724,7 @@ export default function ProviderAuthPanel({
                     <div className={`pwi-auth-row${entry.active ? " pwi-auth-row--active" : ""}`}>
                     <button type="button" className="pwi-auth-row-main"
                       onClick={() => void authHandlers.onSwitchApiKey(item.name, entry)}
-                      disabled={(entry.active && !entry.disabled) || busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)} aria-label={entry.disabled ? `${t("codexAuth.resume")} — ${entry.label ?? entry.masked}` : undefined}>
+                      disabled={(entry.active && !entry.disabled) || busy || Boolean(switchingAccountId) || Boolean(pausingAccountId)} aria-label={entry.disabled ? `${t("pws.resumeAndActivateKey")} — ${entry.label ?? entry.masked}` : undefined}>
                       <span className={`pwi-auth-dot ${entry.active ? "pwi-auth-dot--ok" : "pwi-auth-dot--off"}`} aria-hidden="true" />
                       <span className="pwi-auth-row-copy">
                         <span className="pwi-auth-row-label">{entry.label ?? entry.masked}</span>

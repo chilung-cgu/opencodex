@@ -3,10 +3,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDefaultConfig, loadConfig, saveConfig } from "../../src/config";
+import { handleManagementAPI } from "../../src/server/management-api";
 import { captureAccountAutoPauseAttempt, wasAccountAutoPaused } from "../../src/oauth/account-auto-pause";
 import { providerApiKeySelectionIsCurrent, resolveCurrentProviderApiKeyTransport } from "../../src/providers/api-key-selection";
 import { clearKeyCooldowns, forgetApiKeyRotationCursor, selectProactiveApiKeyTransport } from "../../src/providers/key-failover";
 import { routedProviderConfig } from "../../src/router";
+import { catalogConvergenceFactory } from "../helpers/catalog-convergence";
 import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
 
@@ -217,10 +219,11 @@ test("readProviderApiKeyQuotas skips probes for paused keys while preserving las
   clearProviderApiKeyQuotaCache();
 });
 
-test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C sent once, paused B never sent) and management routes enforce 409 on paused activation", async () => {
+test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C sent once, paused B never sent) and providerHasStoredApiKey preserves all-paused pools", async () => {
   const { handleResponses } = await import("../../src/server/responses/core");
+  const { handleResponsesCompact } = await import("../../src/server/responses/compact");
   const { handleImages } = await import("../../src/server/images");
-  const { handleOauthAccountRoutes } = await import("../../src/server/management/oauth-account-routes");
+  const { providerHasStoredApiKey, setActiveProviderApiKey } = await import("../../src/providers/api-keys");
   const { fetchProviderModels } = await import("../../src/codex/catalog/provider-models");
   const prevFetch = globalThis.fetch;
   const sentKeys: string[] = [];
@@ -252,7 +255,9 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
       },
       "custom-img": {
         adapter: "openai-responses", authMode: "key", baseUrl: "https://example.test/v1",
+        models: ["gpt-4o"], apiKey: "img-key-1",
         apiKeyPool: [{ id: "img-1", key: "img-key-1", disabled: true }],
+        requestPacing: { enabled: true, keySelection: "round-robin", keys: { maxConcurrentRequests: 1 } },
       },
     };
     saveConfig(config);
@@ -264,16 +269,17 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
     expect(res.status, resText).toBe(200);
     expect(sentKeys).toEqual(["vertex-A", "vertex-C"]);
 
-    // Activating paused key B via PUT /api/providers/keys/active returns 409 Conflict.
-    const activatePaused = await handleOauthAccountRoutes({
-      req: new Request("http://127.0.0.1/api/providers/keys/active", {
-        method: "PUT", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "google-vertex", id: "B" }),
-      }),
-      url: new URL("http://127.0.0.1/api/providers/keys/active"),
-      config,
-    });
-    expect(activatePaused?.status).toBe(409);
+    // Activating paused key B is rejected while providerHasStoredApiKey remains true for all-paused pools.
+    expect(setActiveProviderApiKey(config, "google-vertex", "B")).toBe(false);
+    expect(providerHasStoredApiKey({ ...config.providers["custom-img"]!, apiKey: undefined })).toBe(true);
+
+    // Compact endpoint with all keys paused in round-robin pool returns 403 permission_error.
+    const compactRes = await handleResponsesCompact(new Request("http://localhost/v1/responses/compact", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "custom-img/gpt-4o", input: "ping" }),
+    }), config, { model: "", provider: "" });
+    expect(compactRes.status).toBe(403);
+    expect((await compactRes.json() as { error?: { type?: string } }).error?.type).toBe("permission_error");
 
     // Explicit images.provider with all keys paused returns 403 permission_error.
     const imgRes = await handleImages(new Request("http://localhost/v1/images/generations", {
@@ -291,4 +297,25 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
   } finally {
     globalThis.fetch = prevFetch;
   }
+});
+
+test("GET /api/config reports stored API keys when every pool entry is paused", async () => {
+  const config = getDefaultConfig();
+  config.providers = {
+    "google-vertex": {
+      adapter: "google", authMode: "key", googleMode: "vertex", baseUrl: "https://aiplatform.googleapis.com",
+      apiKeyPool: [
+        { id: "A", key: "vertex-A", disabled: true },
+        { id: "B", key: "vertex-B", disabled: true },
+      ],
+    },
+  };
+  const req = new Request("http://127.0.0.1/api/config", { headers: { host: "127.0.0.1" } });
+  const response = await handleManagementAPI(req, new URL(req.url), config, {
+    createManagementConvergeCodex: catalogConvergenceFactory(),
+  }, "gui-session", undefined, { trustedLoopback: true });
+  expect(response?.status, await response?.clone().text()).toBe(200);
+  const dto = await response!.json() as { providers: Record<string, { hasApiKey?: boolean; apiKey?: string }> };
+  expect(dto.providers["google-vertex"]?.hasApiKey).toBe(true);
+  expect(dto.providers["google-vertex"]?.apiKey).toBeUndefined();
 });

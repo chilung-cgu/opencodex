@@ -1,16 +1,21 @@
 import { accountAutoPauseFenceMatchesDisk, type AccountAutoPauseFence } from "../config/account-auto-pause-revisions";
 import { randomUUID } from "node:crypto";
 import { OAuthAccountPausedError } from "../oauth";
+import { clearModelCache } from "../codex/model-cache";
 import type { OcxConfig, OcxProviderConfig } from "../types";
 import type { ProviderApiKeySelection } from "../types/provider";
 import type { AccountPauseDetails } from "../types/account-auto-pause";
 import { apiKeyPoolEntryId } from "./api-keys";
+import { clearKeyCooldowns } from "./api-key-cooldowns";
 import { resolveProviderApiKey } from "./api-key-resolve";
 import { commitProviderApiKeySelection } from "./api-key-selection";
+import { forgetApiKeyRotationCursor } from "./key-failover";
+import { clearProviderQuotaCacheFor } from "./quota/report-cache";
 
 export class ProviderApiKeyPausedError extends OAuthAccountPausedError {
   constructor() {
-    super("API key is paused. Resume it in account settings and retry.");
+    super();
+    this.message = "API key is paused. Resume it in account settings and retry.";
     this.name = "ProviderApiKeyPausedError";
   }
 }
@@ -30,6 +35,7 @@ export function isProviderApiKeyPaused(provider: OcxProviderConfig | undefined):
 
 export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: string, paused: boolean,
   automatic?: { fence: AccountAutoPauseFence; selection: ProviderApiKeySelection; pauseRevision?: string; resolvedKey?: string; details: AccountPauseDetails }): boolean {
+  let activeKeyChanged = false;
   const result = commitProviderApiKeySelection(config, name, provider => {
     if (automatic && !accountAutoPauseFenceMatchesDisk(name, automatic.fence)) return { changed: false, value: false };
     const pool = provider.apiKeyPool?.length ? provider.apiKeyPool
@@ -37,6 +43,7 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
     const entry = pool.find(e => e.id === id);
     if (!entry || automatic && (entry.disabled || entry.key !== automatic.selection.reference || entry.pauseRevision !== automatic.pauseRevision
       || provider.accountAutoPause?.enabled !== true || resolveProviderApiKey(entry.key) !== automatic.resolvedKey)) return { changed: false, value: false };
+    const beforeApiKey = provider.apiKey;
     provider.apiKeyPool = pool;
     const idx = pool.indexOf(entry);
     const ordered = idx >= 0 ? [...pool.slice(idx + 1), ...pool.slice(0, idx)] : pool;
@@ -47,10 +54,12 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
         const next = ordered.find(e => !e.disabled);
         if (next) provider.apiKey = next.key;
         else delete provider.apiKey;
+        activeKeyChanged = beforeApiKey !== provider.apiKey;
         return { changed: true, selectionChanged: true, value: true };
       }
       if (!paused && activeDisabled()) {
         provider.apiKey = entry.key;
+        activeKeyChanged = beforeApiKey !== provider.apiKey;
         return { changed: true, selectionChanged: true, value: true };
       }
       return { changed: false, value: true };
@@ -64,7 +73,17 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
       if (next) provider.apiKey = next.key;
       else delete provider.apiKey;
     } else if (!paused && activeDisabled()) provider.apiKey = entry.key;
+    activeKeyChanged = beforeApiKey !== provider.apiKey;
     return { changed: true, selectionChanged: true, value: true };
   }, automatic?.selection);
-  return result.status === "committed" && result.value;
+  const ok = result.status === "committed" && result.value;
+  if (ok && !automatic) {
+    clearKeyCooldowns(name);
+    forgetApiKeyRotationCursor(name);
+    if (activeKeyChanged) {
+      clearModelCache(name);
+      clearProviderQuotaCacheFor(name);
+    }
+  }
+  return ok;
 }
