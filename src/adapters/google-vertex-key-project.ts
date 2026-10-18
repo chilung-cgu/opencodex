@@ -1,26 +1,45 @@
+import { readBoundedResponseBody } from "../lib/bounded-body";
+import { markEgressTransparentExecutor, providerEgressSendInit } from "../lib/provider-egress";
+import { configuredOutboundFetch } from "../lib/proxy-env";
+import { withUpstreamHttpVersion } from "../lib/upstream-http-version";
+import type { OcxProviderConfig } from "../types";
+
 /**
  * Per-key project discovery for Vertex express-mode API keys (`provider.project: "auto"`).
  *
- * An express-mode key belongs to exactly one Google Cloud project, but the key itself does not
- * carry the id. Google's projectless endpoint names the key's project in its NOT_FOUND message
- * (`projects/<number>/locations/<region>/...`), so one countTokens call for a model id that
- * cannot exist resolves it without credentials beyond the key and without inference billing.
- * The result is the project NUMBER, which the project endpoint accepts in place of the id.
- *
- * This lets an apiKeyPool hold keys from different projects: each request resolves the project
- * of the key it actually sends. Only the fixed Google authority ever receives the key.
+ * An express-mode key belongs to one Google Cloud project, and Google's projectless endpoint
+ * echoes `projects/<number>/locations/<region>/...` in its 404 body for a nonexistent model
+ * (observed 2026-10-18 across five express-mode keys on `aiplatform.googleapis.com`). That is an
+ * undocumented upstream error shape rather than a stable discovery API, so `"auto"` is strictly
+ * opt-in and any non-404, truncated, oversized, invalid-UTF-8 or non-matching body falls back to
+ * the projectless express endpoint without caching.
  */
 export const VERTEX_PROJECT_AUTO = "auto";
 
 const PROBE_URL = "https://aiplatform.googleapis.com/v1/publishers/google/models/ocx-project-probe:countTokens";
 const PROBE_TIMEOUT_MS = 10_000;
+/** Google's 404 JSON for a missing publisher model is ~320 bytes; 4 KiB bounds untrusted bodies. */
+export const VERTEX_PROBE_MAX_BYTES = 4096;
 const PROJECT_NUMBER = /\bprojects\/(\d{1,20})\/locations\//;
 /** Pool sizes are small; the cap only bounds a pathological rotation of distinct keys. */
 const CACHE_LIMIT = 64;
 
-/** Keyed by a digest so the cache never retains raw key material. Insertion-order LRU. */
+/** Keyed by a SHA-256 digest so the cache never retains raw key material. Insertion-order LRU. */
 const resolved = new Map<string, string>();
-const inflight = new Map<string, Promise<string | undefined>>();
+
+interface ProbeWaiter {
+  signal?: AbortSignal;
+  resolve: (project: string | undefined) => void;
+  reject: (reason: unknown) => void;
+  onAbort?: () => void;
+}
+
+interface InflightProbe {
+  controller: AbortController;
+  waiters: Set<ProbeWaiter>;
+}
+
+const inflight = new Map<string, InflightProbe>();
 
 function cacheKey(apiKey: string): string {
   return new Bun.CryptoHasher("sha256").update(apiKey).digest("base64url");
@@ -37,50 +56,161 @@ export function parseVertexProbeProjectNumber(body: string): string | undefined 
   return PROJECT_NUMBER.exec(body)?.[1];
 }
 
-async function probe(apiKey: string, fetchImpl: typeof fetch): Promise<string | undefined> {
+export interface VertexKeyProjectOptions {
+  fetch?: typeof fetch;
+  signal?: AbortSignal;
+  provider?: OcxProviderConfig;
+  providerName?: string;
+  /** Test seam for the bounded-body and request deadline. */
+  timeoutMs?: number;
+}
+
+const defaultOutboundFetch = markEgressTransparentExecutor(
+  ((input: Parameters<typeof fetch>[0], init?: RequestInit) => configuredOutboundFetch(input, init)) as typeof fetch,
+);
+
+function selectProbeFetch(options: VertexKeyProjectOptions): typeof fetch {
+  if (options.fetch) return options.fetch;
+  const provider = options.provider;
+  const customFetch = (provider as (OcxProviderConfig & { fetch?: typeof fetch }) | undefined)?.fetch;
+  if (!provider) return customFetch ?? globalThis.fetch;
+  const base = customFetch ?? defaultOutboundFetch;
+  const providerName = options.providerName ?? "google-vertex";
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const egressInit = providerEgressSendInit({ providerName, provider }, base, input);
+    const versioned = withUpstreamHttpVersion(input, init, provider);
+    return base(input, { ...versioned, ...egressInit });
+  }) as typeof fetch;
+}
+
+async function probe(
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<string | undefined> {
+  const probeSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
   try {
     const res = await fetchImpl(PROBE_URL, {
       method: "POST",
       redirect: "manual",
       headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "x" }] }] }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      signal: probeSignal,
     });
     // Only Google's model NOT_FOUND names the key's project; 401/403/429 and redirects do not.
     if (res.status !== 404) {
       void res.body?.cancel().catch(() => {});
       return undefined;
     }
-    return parseVertexProbeProjectNumber(await res.text());
+    const body = await readBoundedResponseBody(res, {
+      maxBytes: VERTEX_PROBE_MAX_BYTES,
+      totalTimeoutMs: timeoutMs,
+      inactivityTimeoutMs: timeoutMs,
+      firstByteTimeoutMs: timeoutMs,
+      signal: probeSignal,
+      reportUtf8Validity: true,
+    });
+    if (body.truncated || body.oversized || body.timedOut || !body.displaySafe || body.utf8Valid === false) {
+      return undefined;
+    }
+    return parseVertexProbeProjectNumber(body.text);
   } catch {
     return undefined;
   }
 }
 
+function cleanupWaiter(waiter: ProbeWaiter): void {
+  if (waiter.signal && waiter.onAbort) {
+    waiter.signal.removeEventListener("abort", waiter.onAbort);
+  }
+}
+
+function startInflight(
+  key: string,
+  apiKey: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): InflightProbe {
+  const controller = new AbortController();
+  const waiters = new Set<ProbeWaiter>();
+  const entry: InflightProbe = { controller, waiters };
+  inflight.set(key, entry);
+
+  void (async () => {
+    let project: string | undefined;
+    try {
+      project = await probe(apiKey, fetchImpl, controller.signal, timeoutMs);
+    } finally {
+      if (inflight.get(key) === entry) inflight.delete(key);
+    }
+    if (project && !controller.signal.aborted) remember(key, project);
+    for (const waiter of Array.from(waiters)) {
+      cleanupWaiter(waiter);
+      if (waiter.signal?.aborted) waiter.reject(waiter.signal.reason);
+      else waiter.resolve(project);
+    }
+  })();
+
+  return entry;
+}
+
 /**
  * Resolves the project number that owns `apiKey`, or undefined when Google does not reveal it.
  * Successful lookups are cached per key; failures are not, so a transient error retries next time.
- * The caller sends that request to the express endpoint instead, so Google's own status for the
- * key (401/403/429) reaches the normal key-pool failover rather than a synthetic probe error.
+ * Concurrent callers for the same uncached key share one probe; an aborted caller detaches
+ * immediately without cancelling the shared probe unless every waiter has aborted.
  */
-export async function resolveVertexApiKeyProject(apiKey: string, fetchImpl: typeof fetch = globalThis.fetch): Promise<string | undefined> {
+export async function resolveVertexApiKeyProject(
+  apiKey: string,
+  options: VertexKeyProjectOptions | typeof fetch = {},
+): Promise<string | undefined> {
+  const opts: VertexKeyProjectOptions = typeof options === "function" ? { fetch: options } : options;
+  const signal = opts.signal;
+  signal?.throwIfAborted();
+
   const key = cacheKey(apiKey);
   const cached = resolved.get(key);
   if (cached) {
     remember(key, cached);
     return cached;
   }
-  let pending = inflight.get(key);
-  if (!pending) {
-    pending = probe(apiKey, fetchImpl).finally(() => inflight.delete(key));
-    inflight.set(key, pending);
-  }
-  const project = await pending;
-  if (project) remember(key, project);
-  return project;
+
+  // Synchronous egress validation (for example an opaque custom fetch combined with an explicit
+  // provider.proxy) must reject the caller rather than being swallowed into an express fallback.
+  const fetchImpl = selectProbeFetch(opts);
+  const timeoutMs = opts.timeoutMs ?? PROBE_TIMEOUT_MS;
+  const entry = inflight.get(key) ?? startInflight(key, apiKey, fetchImpl, timeoutMs);
+
+  return new Promise<string | undefined>((resolve, reject) => {
+    if (signal?.aborted) {
+      if (entry.waiters.size === 0) {
+        if (inflight.get(key) === entry) inflight.delete(key);
+        entry.controller.abort(signal.reason);
+      }
+      reject(signal.reason);
+      return;
+    }
+    const waiter: ProbeWaiter = { signal, resolve, reject };
+    if (signal) {
+      const onAbort = () => {
+        signal.removeEventListener("abort", onAbort);
+        entry.waiters.delete(waiter);
+        reject(signal.reason);
+        if (entry.waiters.size === 0) {
+          if (inflight.get(key) === entry) inflight.delete(key);
+          entry.controller.abort(signal.reason);
+        }
+      };
+      waiter.onAbort = onAbort;
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    entry.waiters.add(waiter);
+  });
 }
 
 export function __resetVertexApiKeyProjectCache(): void {
   resolved.clear();
+  for (const entry of inflight.values()) entry.controller.abort();
   inflight.clear();
 }
