@@ -924,6 +924,9 @@ export async function handleResponsesCompact(
     const base = isCanonicalOpenAiForwardProvider(compactProvider)
       ? CODEX_FORWARD_BASE_URL
       : (compactProvider.baseUrl ?? "").replace(/\/+$/, "");
+    if (compactProvider.authMode !== "forward" && isProviderApiKeyPaused(compactProvider)) {
+      return formatErrorResponse(403, "permission_error", new ProviderApiKeyPausedError().message);
+    }
     if (compactProvider.authMode !== "forward" && compactProvider.apiKey) {
       // Native compact never enters handleResponses, so it needs its own pre-dispatch key
       // pick. Kept inside this branch on purpose: the overlay above owns the forward and
