@@ -446,6 +446,47 @@ test("quota diagnostics normalize and clear on recovery or management failure", 
   expect(pools.accountSets.oauth.accounts[0].quotaFailure).toBeUndefined();
 });
 
+test("a paused account without cached quota does not fail a successful account refresh", async () => {
+  const accounts = [
+    { id: "active", active: true, paused: false, quotaMode: "probe", quota: reading, quotaUnavailable: false },
+    { id: "paused", active: false, paused: true, quotaMode: "probe", quota: null, quotaUnavailable: true },
+  ];
+  respond = async url => Response.json({
+    activeAccountId: "active",
+    accounts: url.includes("quota=1") ? accounts : accounts.map(({ id, active, paused, quotaMode }) => ({ id, active, paused, quotaMode })),
+  });
+  await act(async () => {
+    expect(await pools.fetchAccountSets(["google-antigravity"], true)).toBe(true);
+  });
+  expect(pools.accountSets["google-antigravity"].accounts.find(row => row.id === "paused"))
+    .toMatchObject({ paused: true, quota: null, quotaUnavailable: true });
+});
+
+test("a refresh with only paused accounts does not report a quota failure", async () => {
+  const accounts = [{ id: "paused", active: true, paused: true, quotaMode: "probe", quota: null, quotaUnavailable: true }];
+  respond = async url => Response.json({
+    activeAccountId: "paused",
+    accounts: url.includes("quota=1") ? accounts : accounts.map(({ id, active, paused, quotaMode }) => ({ id, active, paused, quotaMode })),
+  });
+  await act(async () => {
+    expect(await pools.fetchAccountSets(["google-antigravity"], true)).toBe(true);
+  });
+});
+
+test("an unavailable unpaused account still fails beside a skipped paused account", async () => {
+  const accounts = [
+    { id: "active", active: true, paused: false, quotaMode: "probe", quota: reading, quotaUnavailable: true },
+    { id: "paused", active: false, paused: true, quotaMode: "probe", quota: null, quotaUnavailable: true },
+  ];
+  respond = async url => Response.json({
+    activeAccountId: "active",
+    accounts: url.includes("quota=1") ? accounts : accounts.map(({ id, active, paused, quotaMode }) => ({ id, active, paused, quotaMode })),
+  });
+  await act(async () => {
+    expect(await pools.fetchAccountSets(["google-antigravity"], true)).toBe(false);
+  });
+});
+
 test("initial roster failure clears a settled diagnosis while retaining bars", async () => {
   await act(async () => {
     pools.setAccountSets({ fixture: { activeAccountId: "a", accounts: [

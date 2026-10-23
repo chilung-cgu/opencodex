@@ -371,7 +371,9 @@ maintainers do not provide policy advice and cannot resolve provider enforcement
   days as 30d instead of assuming every primary window is weekly. Responses without a duration keep
   the legacy weekly interpretation.
 - **Refresh quotas** re-reads account usage immediately so routing and the account cards use the same
-  values.
+  values. Paused accounts are skipped; if one has no cached reading, its row stays unavailable but
+  does not affect the provider refresh result. The operation reports a failure when an unpaused,
+  quota-capable account's reading is unavailable.
 - Pool request logs use opaque labels such as `p3fa91c`, never account emails.
 - Each account card also shows that stable log label, the observed 30-day token total, an approximate
   API-equivalent cost using currently configured display pricing, and the fraction of attempts with
