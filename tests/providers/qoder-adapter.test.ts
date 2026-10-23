@@ -639,7 +639,7 @@ describe("qoder adapter", () => {
       context: {
         messages: [
           { role: "user", content: [{ type: "image", imageUrl: "data:image/png;base64,HIST==" }], timestamp: 0 },
-          { role: "assistant", content: "I see the first image.", timestamp: 1 },
+          { role: "assistant", content: [{ type: "text", text: "I see the first image." }], timestamp: 1 },
           {
             role: "user",
             content: [
@@ -732,7 +732,7 @@ describe("qoder adapter", () => {
       context: {
         messages: [
           { role: "user", content: "first turn", timestamp: 0 },
-          { role: "assistant", content: "response", timestamp: 1 },
+          { role: "assistant", content: [{ type: "text", text: "response" }], timestamp: 1 },
           {
             role: "user",
             content: [
