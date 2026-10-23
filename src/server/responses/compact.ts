@@ -924,10 +924,7 @@ export async function handleResponsesCompact(
     const base = isCanonicalOpenAiForwardProvider(compactProvider)
       ? CODEX_FORWARD_BASE_URL
       : (compactProvider.baseUrl ?? "").replace(/\/+$/, "");
-    if (compactProvider.authMode !== "forward" && isProviderApiKeyPaused(compactProvider)) {
-      return formatErrorResponse(403, "permission_error", new ProviderApiKeyPausedError().message);
-    }
-    if (compactProvider.authMode !== "forward" && compactProvider.apiKey) {
+    if (compactProvider.authMode !== "forward" && (compactProvider.apiKey || compactProvider.apiKeyPool?.length)) {
       // Native compact never enters handleResponses, so it needs its own pre-dispatch key
       // pick. Kept inside this branch on purpose: the overlay above owns the forward and
       // codexAccountMode cases, and the picker returns null for them anyway.
@@ -944,11 +941,13 @@ export async function handleResponsesCompact(
         throw error;
       }
       if (warmKeyProvider?.apiKey) compactProvider = warmKeyProvider;
-      if (isProviderApiKeyPaused(compactProvider)) {
-        return formatErrorResponse(403, "permission_error", new ProviderApiKeyPausedError().message);
+      if (compactProvider.apiKey) {
+        headers.set("authorization", `Bearer ${resolveProviderApiKey(compactProvider.apiKey)}`);
+        stampApiKeyAccountLabel(logCtx, route.providerName, compactProvider);
       }
-      headers.set("authorization", `Bearer ${resolveProviderApiKey(compactProvider.apiKey)}`);
-      stampApiKeyAccountLabel(logCtx, route.providerName, compactProvider);
+    }
+    if (compactProvider.authMode !== "forward" && isProviderApiKeyPaused(compactProvider)) {
+      return formatErrorResponse(403, "permission_error", new ProviderApiKeyPausedError().message);
     }
     const { reasoning: _reasoning, ...compactBodyRaw } = raw as typeof raw & { reasoning?: unknown };
     const requireCompactPlaintextReasoning = !isOpenAiOperatedResponsesDestination(compactProvider)

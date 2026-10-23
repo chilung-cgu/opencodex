@@ -14,16 +14,31 @@ import { clearProviderQuotaCacheFor } from "./quota/report-cache";
 
 export { ProviderApiKeyPausedError, isProviderApiKeyPaused } from "./api-key-pause-state";
 
-export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: string, paused: boolean,
-  automatic?: { fence: AccountAutoPauseFence; selection: ProviderApiKeySelection; pauseRevision?: string; resolvedKey?: string; details: AccountPauseDetails }): boolean {
+export interface ProviderApiKeyPauseResult {
+  ok: boolean;
+  activeAccountId: string | null;
+  activeAccountChanged: boolean;
+}
+
+export function setProviderApiKeyPausedWithResult(config: OcxConfig, name: string, id: string, paused: boolean,
+  automatic?: { fence: AccountAutoPauseFence; selection: ProviderApiKeySelection; pauseRevision?: string; resolvedKey?: string; details: AccountPauseDetails }): ProviderApiKeyPauseResult {
   let activeKeyChanged = false;
   const result = commitProviderApiKeySelection(config, name, provider => {
-    if (automatic && !accountAutoPauseFenceMatchesDisk(name, automatic.fence)) return { changed: false, value: false };
+    if (automatic && !accountAutoPauseFenceMatchesDisk(name, automatic.fence)) {
+      return { changed: false, value: { ok: false, activeAccountId: null, activeAccountChanged: false } };
+    }
     const pool = provider.apiKeyPool?.length ? provider.apiKeyPool
       : provider.apiKey ? [{ id: apiKeyPoolEntryId(provider.apiKey), key: provider.apiKey }] : [];
+    const beforeActiveAccountId = pool.find(entry => entry.key === provider.apiKey)?.id ?? null;
+    const resultForCurrentSelection = (ok: boolean): ProviderApiKeyPauseResult => {
+      const activeAccountId = pool.find(entry => entry.key === provider.apiKey)?.id ?? null;
+      return { ok, activeAccountId, activeAccountChanged: beforeActiveAccountId !== activeAccountId };
+    };
     const entry = pool.find(e => e.id === id);
     if (!entry || automatic && (entry.disabled || entry.key !== automatic.selection.reference || entry.pauseRevision !== automatic.pauseRevision
-      || provider.accountAutoPause?.enabled !== true || resolveProviderApiKey(entry.key) !== automatic.resolvedKey)) return { changed: false, value: false };
+      || provider.accountAutoPause?.enabled !== true || resolveProviderApiKey(entry.key) !== automatic.resolvedKey)) {
+      return { changed: false, value: resultForCurrentSelection(false) };
+    }
     const beforeApiKey = provider.apiKey;
     provider.apiKeyPool = pool;
     const idx = pool.indexOf(entry);
@@ -36,14 +51,14 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
         if (next) provider.apiKey = next.key;
         else delete provider.apiKey;
         activeKeyChanged = beforeApiKey !== provider.apiKey;
-        return { changed: true, selectionChanged: true, value: true };
+        return { changed: true, selectionChanged: true, value: resultForCurrentSelection(true) };
       }
       if (!paused && activeDisabled()) {
         provider.apiKey = entry.key;
         activeKeyChanged = beforeApiKey !== provider.apiKey;
-        return { changed: true, selectionChanged: true, value: true };
+        return { changed: true, selectionChanged: true, value: resultForCurrentSelection(true) };
       }
-      return { changed: false, value: true };
+      return { changed: false, value: resultForCurrentSelection(true) };
     }
     entry.disabled = paused;
     entry.pauseRevision = randomUUID();
@@ -55,9 +70,12 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
       else delete provider.apiKey;
     } else if (!paused && activeDisabled()) provider.apiKey = entry.key;
     activeKeyChanged = beforeApiKey !== provider.apiKey;
-    return { changed: true, selectionChanged: true, value: true };
+    return { changed: true, selectionChanged: true, value: resultForCurrentSelection(true) };
   }, automatic?.selection);
-  const ok = result.status === "committed" && result.value;
+  const response = result.status === "committed"
+    ? result.value
+    : { ok: false, activeAccountId: null, activeAccountChanged: false };
+  const ok = response.ok;
   if (ok && !automatic) {
     clearKeyCooldowns(name);
     forgetApiKeyRotationCursor(name);
@@ -66,5 +84,10 @@ export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: str
       clearProviderQuotaCacheFor(name);
     }
   }
-  return ok;
+  return response;
+}
+
+export function setProviderApiKeyPaused(config: OcxConfig, name: string, id: string, paused: boolean,
+  automatic?: { fence: AccountAutoPauseFence; selection: ProviderApiKeySelection; pauseRevision?: string; resolvedKey?: string; details: AccountPauseDetails }): boolean {
+  return setProviderApiKeyPausedWithResult(config, name, id, paused, automatic).ok;
 }

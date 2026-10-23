@@ -255,7 +255,7 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
       },
       "custom-img": {
         adapter: "openai-responses", authMode: "key", baseUrl: "https://example.test/v1",
-        models: ["gpt-4o"], apiKey: "img-key-1",
+        models: ["gpt-4o"], apiKey: "img-key-1", supportsNativeCompactEndpoint: true,
         apiKeyPool: [{ id: "img-1", key: "img-key-1", disabled: true }],
         requestPacing: { enabled: true, keySelection: "round-robin", keys: { maxConcurrentRequests: 1 } },
       },
@@ -274,12 +274,14 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
     expect(providerHasStoredApiKey({ ...config.providers["custom-img"]!, apiKey: undefined })).toBe(true);
 
     // Compact endpoint with all keys paused in round-robin pool returns 403 permission_error.
+    sentKeys.length = 0;
     const compactRes = await handleResponsesCompact(new Request("http://localhost/v1/responses/compact", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "custom-img/gpt-4o", input: "ping" }),
     }), config, { model: "", provider: "" });
     expect(compactRes.status).toBe(403);
     expect((await compactRes.json() as { error?: { type?: string } }).error?.type).toBe("permission_error");
+    expect(sentKeys).toEqual([]);
 
     // Explicit images.provider with all keys paused returns 403 permission_error.
     const imgRes = await handleImages(new Request("http://localhost/v1/images/generations", {
@@ -296,6 +298,73 @@ test("Google Vertex and AI Studio 429 failover skips paused keys (A sent once, C
     expect(sentKeys).toEqual([]);
   } finally {
     globalThis.fetch = prevFetch;
+  }
+});
+
+test("native compact falls back from a paused selected key to an enabled key", async () => {
+  const { handleResponsesCompact } = await import("../../src/server/responses/compact");
+  const previousFetch = globalThis.fetch;
+  const sentKeys: string[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    sentKeys.push(new Headers(init?.headers).get("authorization") ?? "");
+    return Response.json({ id: "compact-result" });
+  }) as typeof fetch;
+  try {
+    const config = getDefaultConfig();
+    config.providers = {
+      "compact-fallback": {
+        adapter: "openai-responses", authMode: "key", baseUrl: "https://example.test/v1",
+        models: ["gpt-4o"], apiKey: "paused-key", supportsNativeCompactEndpoint: true,
+        apiKeyPool: [
+          { id: "paused", key: "paused-key", disabled: true },
+          { id: "enabled", key: "enabled-key" },
+        ],
+      },
+    };
+    saveConfig(config);
+
+    const response = await handleResponsesCompact(new Request("http://localhost/v1/responses/compact", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "compact-fallback/gpt-4o", input: "ping" }),
+    }), config, { model: "", provider: "" });
+
+    expect(sentKeys).toEqual(["Bearer enabled-key"]);
+    expect(response.status, await response.clone().text()).toBe(200);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("native compact selects an enabled pool key when the active key is missing", async () => {
+  const { handleResponsesCompact } = await import("../../src/server/responses/compact");
+  const previousFetch = globalThis.fetch;
+  const sentKeys: string[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    sentKeys.push(new Headers(init?.headers).get("authorization") ?? "");
+    return Response.json({ id: "compact-result" });
+  }) as typeof fetch;
+  try {
+    const config = getDefaultConfig();
+    config.providers = {
+      "compact-missing-active": {
+        adapter: "openai-responses", authMode: "key", baseUrl: "https://example.test/v1",
+        models: ["gpt-4o"], apiKeyPool: [
+          { id: "paused", key: "paused-key", disabled: true },
+          { id: "enabled", key: "enabled-key" },
+        ], supportsNativeCompactEndpoint: true,
+      },
+    };
+    saveConfig(config);
+
+    const response = await handleResponsesCompact(new Request("http://localhost/v1/responses/compact", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "compact-missing-active/gpt-4o", input: "ping" }),
+    }), config, { model: "", provider: "" });
+
+    expect(sentKeys).toEqual(["Bearer enabled-key"]);
+    expect(response.status, await response.clone().text()).toBe(200);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
 
@@ -318,4 +387,44 @@ test("GET /api/config reports stored API keys when every pool entry is paused", 
   const dto = await response!.json() as { providers: Record<string, { hasApiKey?: boolean; apiKey?: string }> };
   expect(dto.providers["google-vertex"]?.hasApiKey).toBe(true);
   expect(dto.providers["google-vertex"]?.apiKey).toBeUndefined();
+});
+
+test("PUT provider API-key pause returns the committed active account", async () => {
+  const config = getDefaultConfig();
+  config.providers = {
+    fixture: {
+      adapter: "openai-chat", authMode: "key", baseUrl: "https://example.test/v1",
+      apiKey: "key-a", apiKeyPool: [{ id: "A", key: "key-a" }, { id: "B", key: "key-b" }],
+    },
+  };
+  saveConfig(config);
+  const pause = async (id: string, paused: boolean) => {
+    const request = new Request("http://127.0.0.1/api/providers/keys/pause", {
+      method: "PUT", headers: { host: "127.0.0.1", "content-type": "application/json" },
+      body: JSON.stringify({ name: "fixture", id, paused }),
+    });
+    return handleManagementAPI(request, new URL(request.url), config, {
+      createManagementConvergeCodex: catalogConvergenceFactory(),
+    }, "gui-session", undefined, { trustedLoopback: true });
+  };
+
+  const pauseA = await pause("A", true);
+  expect(pauseA?.status, await pauseA?.clone().text()).toBe(200);
+  expect(await pauseA!.json()).toEqual({ ok: true, activeAccountId: "B", activeAccountChanged: true });
+
+  const pauseB = await pause("B", true);
+  expect(pauseB?.status, await pauseB?.clone().text()).toBe(200);
+  expect(await pauseB!.json()).toEqual({ ok: true, activeAccountId: null, activeAccountChanged: true });
+
+  const pauseBAgain = await pause("B", true);
+  expect(pauseBAgain?.status, await pauseBAgain?.clone().text()).toBe(200);
+  expect(await pauseBAgain!.json()).toEqual({ ok: true, activeAccountId: null, activeAccountChanged: false });
+
+  const resumeA = await pause("A", false);
+  expect(resumeA?.status, await resumeA?.clone().text()).toBe(200);
+  expect(await resumeA!.json()).toEqual({ ok: true, activeAccountId: "A", activeAccountChanged: true });
+
+  const resumeB = await pause("B", false);
+  expect(resumeB?.status, await resumeB?.clone().text()).toBe(200);
+  expect(await resumeB!.json()).toEqual({ ok: true, activeAccountId: "A", activeAccountChanged: false });
 });
