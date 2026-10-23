@@ -49,12 +49,45 @@ test("a failed pause transport reports an unreachable proxy and its cause", asyn
 test("API-key pause JSON uses the same two-space indentation as the other pools", async () => {
   const result = await run("reserve", { json: true });
   expect(result.code).toBe(0);
-  expect(result.lines).toEqual([JSON.stringify({ ok: true, provider: "fixture", id: "key-1", paused: true }, null, 2)]);
+  expect(result.lines).toEqual([JSON.stringify({ ok: true, provider: "fixture", id: "key-1", paused: true, activeAccountId: null, activeAccountChanged: false }, null, 2)]);
   expect(result.writes).toEqual([{ name: "fixture", id: "key-1", paused: true }]);
+});
+
+test("API-key pause JSON infers the next active account when the active key is paused", async () => {
+  const result = await run("primary", {
+    json: true,
+    keys: [{ id: "key-1", label: "primary", active: true }, { id: "key-2", label: "backup" }],
+  });
+  expect(result.code).toBe(0);
+  expect(result.lines).toEqual([JSON.stringify({
+    ok: true, provider: "fixture", id: "key-1", paused: true,
+    activeAccountId: "key-2", activeAccountChanged: true,
+  }, null, 2)]);
 });
 
 test("the defensive pause usage fallback also names API-key pools", async () => {
   const source = await Bun.file(repoPath("src/cli/account-extended.ts")).text();
   const fallback = source.split("\n").find(line => line.includes("${verb} applies to"));
   expect(fallback).toContain('applies to the openai Codex account pool, a generic OAuth provider, or an API-key pool');
+});
+
+test("API-key pause prints active account handoff notice on stderr when activeAccountChanged is true", async () => {
+  const lines: string[] = [], errors: string[] = [];
+  const log = console.log, error = console.error;
+  console.log = value => { lines.push(String(value)); };
+  console.error = value => { errors.push(String(value)); };
+  const deps: AccountDeps = {
+    baseUrl: "http://127.0.0.1:10100",
+    loadConfigImpl: () => ({ providers: { "google-vertex": { adapter: "google", authMode: "key" } } }) as never,
+    fetchImpl: (async (_url, init) => {
+      if (init?.method === "PUT") return Response.json({ ok: true, activeId: "key-2", activeAccountId: "key-2", activeAccountChanged: true });
+      return Response.json({ keys: [{ id: "key-1", label: "primary" }, { id: "key-2", label: "backup" }] });
+    }) as typeof fetch,
+  };
+  try {
+    const code = await cmdPause(["google-vertex", "primary"], deps, true);
+    expect(code).toBe(0);
+    expect(lines).toEqual(["google-vertex: account paused"]);
+    expect(errors).toEqual(["Active account changed to key-2."]);
+  } finally { console.log = log; console.error = error; }
 });
