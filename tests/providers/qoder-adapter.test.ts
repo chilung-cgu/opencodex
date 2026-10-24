@@ -752,7 +752,73 @@ describe("qoder adapter", () => {
     expect(images).toHaveLength(0);
     const textPart = wire.message.content.find((part: { type: string }) => part.type === "text");
     expect(textPart?.text).toContain("[image omitted: unsupported reference]");
+    expect(textPart?.text).toContain("ASSISTANT:\nresponse");
     expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  test("marks unsupported image references in a single-turn user message", () => {
+    const lines = buildConversationInput(parsed({
+      context: {
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: "inspect link" },
+            { type: "image", imageUrl: "ftp://invalid-scheme.test/image.png" },
+          ],
+          timestamp: 0,
+        }],
+      },
+    }));
+
+    expect(lines).toHaveLength(1);
+    const frame = JSON.parse(lines[0]!);
+    expect(frame.message.content).toContainEqual({ type: "text", text: "inspect link" });
+    expect(frame.message.content).toContainEqual({ type: "text", text: "[image omitted: unsupported reference]" });
+  });
+
+  test("keeps a single-turn frame for an unsupported image-only message", () => {
+    const lines = buildConversationInput(parsed({
+      context: {
+        messages: [{
+          role: "user",
+          content: [{ type: "image", imageUrl: "ftp://invalid-scheme.test/image.png" }],
+          timestamp: 0,
+        }],
+      },
+    }));
+
+    expect(lines).toHaveLength(1);
+    const frame = JSON.parse(lines[0]!);
+    expect(frame.message.content).toContainEqual({ type: "text", text: "[image omitted: unsupported reference]" });
+  });
+
+  test("marks unsupported images in prior user and tool-result history as omitted", () => {
+    const lines = buildConversationInput(parsed({
+      context: {
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "image", imageUrl: "ftp://invalid-scheme.test/user.png" }],
+            timestamp: 0,
+          },
+          { role: "assistant", content: [{ type: "text", text: "I saw the image." }], timestamp: 1 },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            content: [{ type: "image", imageUrl: "ftp://invalid-scheme.test/tool.png" }],
+            timestamp: 2,
+          },
+          { role: "user", content: "What was attached?", timestamp: 3 },
+        ],
+      },
+    }));
+
+    expect(lines).toHaveLength(1);
+    const frame = JSON.parse(lines[0]!);
+    const text = frame.message.content.find((part: { type: string }) => part.type === "text")?.text;
+    expect(text).toContain("USER:\n[image omitted: unsupported reference]");
+    expect(text).toContain("TOOL RESULT (call_id: call_1):\n[image omitted: unsupported reference]");
+    expect(frame.message.content.filter((part: { type: string }) => part.type === "image")).toHaveLength(0);
   });
 
   test("leaves plain text-only requests completely unaffected", async () => {
