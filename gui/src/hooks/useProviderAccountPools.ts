@@ -314,7 +314,8 @@ export function useProviderAccountPools(deps: {
             setKeyPools(current => currentQuota() ? { ...current, [name]: currentRoster()
               ? mergeQuotaRows(enriched, current[name] ?? [], true)
               : mergeLateQuotaRows(current[name] ?? [], enriched) } : current);
-            return !enriched.some(row => row.quotaUnavailable === true);
+            const refreshable = enriched.filter(row => row.disabled !== true && supportsQuotaRead(row));
+            return !refreshable.some(row => row.quotaUnavailable === true);
           } catch {
             if (currentQuota()) setKeyPools(current => currentQuota()
               ? { ...current, [name]: unavailableQuotaRows(current[name] ?? [], rows) } : current);

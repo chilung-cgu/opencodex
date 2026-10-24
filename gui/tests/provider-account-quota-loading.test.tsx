@@ -487,6 +487,32 @@ test("an unavailable unpaused account still fails beside a skipped paused accoun
   });
 });
 
+for (const scenario of [
+  { name: "a paused key is unavailable", enabledUnavailable: false, unsupportedUnavailable: false, allPaused: false, expected: true },
+  { name: "an enabled key is unavailable", enabledUnavailable: true, unsupportedUnavailable: false, allPaused: false, expected: false },
+  { name: "an unsupported key has unavailable quota", enabledUnavailable: false, unsupportedUnavailable: true, allPaused: false, expected: true },
+  { name: "every key is paused", enabledUnavailable: false, unsupportedUnavailable: false, allPaused: true, expected: true },
+]) {
+  test(`API-key quota refresh result is scoped correctly when ${scenario.name}`, async () => {
+    const keys = scenario.allPaused
+      ? [{ id: "paused", masked: "paused", active: false, disabled: true, quotaMode: "probe", quota: null, quotaUnavailable: true }]
+      : [
+        { id: "enabled", masked: "enabled", active: true, disabled: false, quotaMode: "probe", quota: scenario.enabledUnavailable ? null : reading, quotaUnavailable: scenario.enabledUnavailable },
+        { id: "paused", masked: "paused", active: false, disabled: true, quotaMode: "probe", quota: null, quotaUnavailable: true },
+        ...(scenario.unsupportedUnavailable ? [{ id: "unsupported", masked: "unsupported", active: false, disabled: false, quotaMode: "unsupported", quotaUnavailable: true }] : []),
+      ];
+    respond = async url => Response.json({
+      activeId: scenario.allPaused ? null : "enabled",
+      keys: url.includes("quota=1") ? keys : keys.map(({ id, active, disabled, quotaMode }) => ({ id, active, disabled, quotaMode })),
+    });
+    await act(async () => {
+      expect(await pools.fetchKeyPools(["fixture"], true)).toBe(scenario.expected);
+    });
+    expect(pools.keyPools.fixture.find(row => row.id === "paused"))
+      .toMatchObject({ disabled: true, quota: null, quotaUnavailable: true });
+  });
+}
+
 test("initial roster failure clears a settled diagnosis while retaining bars", async () => {
   await act(async () => {
     pools.setAccountSets({ fixture: { activeAccountId: "a", accounts: [
