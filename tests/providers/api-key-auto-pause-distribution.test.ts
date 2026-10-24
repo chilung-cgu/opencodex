@@ -8,6 +8,7 @@ import { captureAccountAutoPauseAttempt, wasAccountAutoPaused } from "../../src/
 import { providerApiKeySelectionIsCurrent, resolveCurrentProviderApiKeyTransport } from "../../src/providers/api-key-selection";
 import { clearKeyCooldowns, forgetApiKeyRotationCursor, selectProactiveApiKeyTransport } from "../../src/providers/key-failover";
 import { routedProviderConfig } from "../../src/router";
+import { OPENAI_API_PROVIDER_ID } from "../../src/providers/openai-tiers";
 import { catalogConvergenceFactory } from "../helpers/catalog-convergence";
 import { acquireOwnedSpendHome } from "../helpers/owned-spend-home";
 import { removeTreeWithRetry } from "../helpers/remove-tree";
@@ -435,39 +436,51 @@ test("PUT provider API-key pause commits the active selection and preserves its 
   expect(config.providers.fixture?.apiKey).toBe("key-a");
 });
 
-test("explicit images provider falls back from a paused selected key to an enabled pool key", async () => {
-  const { handleImages } = await import("../../src/server/images");
-  const previousFetch = globalThis.fetch;
-  const sentKeys: string[] = [];
-  globalThis.fetch = (async (_input, init) => {
-    sentKeys.push(new Headers(init?.headers).get("authorization") ?? "");
-    return Response.json({ data: [{ b64_json: "synthetic-image-base64" }] });
-  }) as typeof fetch;
-  try {
-    const config = getDefaultConfig();
-    config.providers = {
-      "images-fallback": {
-        adapter: "openai-responses", authMode: "key", baseUrl: "https://example.test/v1",
-        apiKey: "paused-key",
-        apiKeyPool: [
-          { id: "paused", key: "paused-key", disabled: true },
-          { id: "enabled", key: "enabled-key" },
-        ],
-      },
-    };
-    config.images = { provider: "images-fallback" };
-    saveConfig(config);
+for (const variant of [
+  { kind: "explicit", providerName: "images-fallback", baseUrl: "https://example.test/v1" },
+  { kind: "auto", providerName: OPENAI_API_PROVIDER_ID, baseUrl: "https://api.openai.com/v1" },
+] as const) {
+  test(`${variant.kind === "explicit" ? "explicit images provider" : "default openai-apikey fallback"} falls back from a paused selected key to an enabled pool key`, async () => {
+    const { handleImages } = await import("../../src/server/images");
+    const { selectOpenAiImagesProvider } = await import("../../src/providers/openai-sidecar");
+    const previousFetch = globalThis.fetch;
+    const sentKeys: string[] = [];
+    globalThis.fetch = (async (_input, init) => {
+      sentKeys.push(new Headers(init?.headers).get("authorization") ?? "");
+      return Response.json({ data: [{ b64_json: "synthetic-image-base64" }] });
+    }) as typeof fetch;
+    try {
+      const config = getDefaultConfig();
+      config.providers = {
+        [variant.providerName]: {
+          adapter: "openai-responses", authMode: "key", baseUrl: variant.baseUrl,
+          apiKey: "paused-key",
+          apiKeyPool: [
+            { id: "paused", key: "paused-key", disabled: true },
+            { id: "enabled", key: "enabled-key" },
+          ],
+        },
+      };
+      if (variant.kind === "explicit") {
+        config.images = { provider: variant.providerName };
+      }
+      saveConfig(config);
 
-    const response = await handleImages(new Request("http://localhost/v1/images/generations", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt: "cat" }),
-    }), config, "generations", { model: "", provider: "" });
+      if (variant.kind === "auto") {
+        expect(selectOpenAiImagesProvider(config).keyed).toBeUndefined();
+      }
 
-    expect(response.status, await response.clone().text()).toBe(200);
-    expect(sentKeys).toEqual(["Bearer enabled-key"]);
-    expect(config.providers["images-fallback"]?.apiKey).toBe("enabled-key");
-    expect(loadConfig().providers["images-fallback"]?.apiKey).toBe("enabled-key");
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
+      const response = await handleImages(new Request("http://localhost/v1/images/generations", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "cat" }),
+      }), config, "generations", { model: "", provider: "" });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(sentKeys).toEqual(["Bearer enabled-key"]);
+      expect(config.providers[variant.providerName]?.apiKey).toBe("enabled-key");
+      expect(loadConfig().providers[variant.providerName]?.apiKey).toBe("enabled-key");
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
+  });
+}
