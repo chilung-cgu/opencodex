@@ -389,7 +389,7 @@ test("GET /api/config reports stored API keys when every pool entry is paused", 
   expect(dto.providers["google-vertex"]?.apiKey).toBeUndefined();
 });
 
-test("PUT provider API-key pause returns the committed active account", async () => {
+test("PUT provider API-key pause commits the active selection and preserves its response", async () => {
   const config = getDefaultConfig();
   config.providers = {
     fixture: {
@@ -410,21 +410,26 @@ test("PUT provider API-key pause returns the committed active account", async ()
 
   const pauseA = await pause("A", true);
   expect(pauseA?.status, await pauseA?.clone().text()).toBe(200);
-  expect(await pauseA!.json()).toEqual({ ok: true, activeAccountId: "B", activeAccountChanged: true });
+  expect(await pauseA!.json()).toEqual({ ok: true });
+  expect(config.providers.fixture?.apiKey).toBe("key-b");
 
   const pauseB = await pause("B", true);
   expect(pauseB?.status, await pauseB?.clone().text()).toBe(200);
-  expect(await pauseB!.json()).toEqual({ ok: true, activeAccountId: null, activeAccountChanged: true });
+  expect(await pauseB!.json()).toEqual({ ok: true });
+  expect(config.providers.fixture?.apiKey).toBeUndefined();
 
   const pauseBAgain = await pause("B", true);
   expect(pauseBAgain?.status, await pauseBAgain?.clone().text()).toBe(200);
-  expect(await pauseBAgain!.json()).toEqual({ ok: true, activeAccountId: null, activeAccountChanged: false });
+  expect(await pauseBAgain!.json()).toEqual({ ok: true });
+  expect(config.providers.fixture?.apiKey).toBeUndefined();
 
   const resumeA = await pause("A", false);
   expect(resumeA?.status, await resumeA?.clone().text()).toBe(200);
-  expect(await resumeA!.json()).toEqual({ ok: true, activeAccountId: "A", activeAccountChanged: true });
+  expect(await resumeA!.json()).toEqual({ ok: true });
+  expect(config.providers.fixture?.apiKey).toBe("key-a");
 
   const resumeB = await pause("B", false);
   expect(resumeB?.status, await resumeB?.clone().text()).toBe(200);
-  expect(await resumeB!.json()).toEqual({ ok: true, activeAccountId: "A", activeAccountChanged: false });
+  expect(await resumeB!.json()).toEqual({ ok: true });
+  expect(config.providers.fixture?.apiKey).toBe("key-a");
 });
