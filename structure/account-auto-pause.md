@@ -96,8 +96,9 @@ OAuth and Codex account-list DTOs project optional `pauseDetails` (fixed reason 
 ms timestamp) beside the existing pause flag. The CLI preserves those fields and includes
 the reason in account listings. `src/server/management/oauth-account-routes.ts` also serves
 `PUT /api/providers/keys/pause` with provider `name`, key `id` and boolean `paused`, through
-the existing management authorization boundary. Key listings expose `disabled` and pause
-details. OAuth upserts for dual-auth providers keep validated key pause fields through
+the existing management authorization boundary. Its success response reports the committed
+`activeAccountId` (or `null`) and whether the active key changed. Key listings expose `disabled`
+and pause details. OAuth upserts for dual-auth providers keep validated key pause fields through
 `src/oauth/api-key-pool-preserve.ts` and never promote a paused key to the active key. Dashboard key Resume clears the pause through that endpoint before activating
 the key; OAuth/Codex keep their existing resume actions.
 `src/server/management/route-registry.ts` declares key pause as an ordinary management mutation,
