@@ -3,7 +3,7 @@ import { cmdPause } from "../../src/cli/account-extended";
 import type { AccountDeps } from "../../src/cli/account-api";
 import { repoPath } from "../helpers/repo-root";
 
-async function run(requested: string, options: { failWrite?: boolean; keys?: unknown[]; json?: boolean; pauseResponse?: unknown } = {}) {
+async function run(requested: string, options: { failWrite?: boolean; keys?: unknown[]; json?: boolean; pauseResponse?: unknown; paused?: boolean } = {}) {
   const lines: string[] = [], errors: string[] = [], writes: unknown[] = [];
   const log = console.log, error = console.error;
   console.log = value => { lines.push(String(value)); };
@@ -21,7 +21,8 @@ async function run(requested: string, options: { failWrite?: boolean; keys?: unk
     }) as typeof fetch,
   };
   try {
-    const code = await cmdPause(["fixture", requested, ...(options.json ? ["--json"] : [])], deps, true);
+    const paused = options.paused ?? true;
+    const code = await cmdPause(["fixture", requested, ...(options.json ? ["--json"] : [])], deps, paused);
     return { code, lines, errors, writes };
   } finally { console.log = log; console.error = error; }
 }
@@ -103,4 +104,39 @@ test("API-key pause prints active account handoff notice on stderr when activeAc
     expect(lines).toEqual(["google-vertex: account paused"]);
     expect(errors).toEqual(["Active account changed to key-2."]);
   } finally { console.log = log; console.error = error; }
+});
+
+test("API-key pause prioritizes authoritative server active state over stale roster", async () => {
+  const result = await run("key-B", {
+    json: true,
+    keys: [
+      { id: "key-A", label: "key-A", active: true },
+      { id: "key-B", label: "key-B" },
+      { id: "key-C", label: "key-C" },
+    ],
+    pauseResponse: { ok: true, activeAccountId: "key-C", activeAccountChanged: false },
+  });
+  expect(result.code).toBe(0);
+  expect(result.writes).toEqual([{ name: "fixture", id: "key-B", paused: true }]);
+  expect(result.lines).toEqual([JSON.stringify({
+    ok: true, provider: "fixture", id: "key-B", paused: true,
+    activeAccountId: "key-C", activeAccountChanged: false,
+  }, null, 2)]);
+  expect(result.errors).toEqual([]);
+});
+
+test("API-key resume preserves healthy active key and honors authoritative false", async () => {
+  const result = await run("key-B", {
+    paused: false,
+    json: false,
+    keys: [
+      { id: "key-A", label: "key-A", active: true },
+      { id: "key-B", label: "key-B", disabled: true },
+    ],
+    pauseResponse: { ok: true, activeAccountId: "key-A", activeAccountChanged: false },
+  });
+  expect(result.code).toBe(0);
+  expect(result.writes).toEqual([{ name: "fixture", id: "key-B", paused: false }]);
+  expect(result.lines).toEqual(["fixture: account resumed"]);
+  expect(result.errors).toEqual([]);
 });

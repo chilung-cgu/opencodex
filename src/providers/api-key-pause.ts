@@ -45,16 +45,11 @@ export function setProviderApiKeyPausedWithResult(config: OcxConfig, name: strin
     const ordered = idx >= 0 ? [...pool.slice(idx + 1), ...pool.slice(0, idx)] : pool;
     const activeDisabled = () => !provider.apiKey
       || (pool.some(e => e.disabled && e.key === provider.apiKey) && !pool.some(e => !e.disabled && e.key === provider.apiKey));
-    if (!automatic && Boolean(entry.disabled) === paused) {
-      if (paused && provider.apiKey === entry.key) {
+    if (!automatic && paused && entry.disabled) {
+      if (provider.apiKey === entry.key) {
         const next = ordered.find(e => !e.disabled);
         if (next) provider.apiKey = next.key;
         else delete provider.apiKey;
-        activeKeyChanged = beforeApiKey !== provider.apiKey;
-        return { changed: true, selectionChanged: true, value: resultForCurrentSelection(true) };
-      }
-      if (!paused && activeDisabled()) {
-        provider.apiKey = entry.key;
         activeKeyChanged = beforeApiKey !== provider.apiKey;
         return { changed: true, selectionChanged: true, value: resultForCurrentSelection(true) };
       }

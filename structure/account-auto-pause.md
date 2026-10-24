@@ -31,7 +31,7 @@ counters. Their transport and lifetime follow the [Responses image replay contra
 the policy and allowlisted reason/timestamp DTO. OAuth pause metadata is stored with the
 auth row; Codex metadata/revision fences use `codexAccountPauseState`; key pools retain
 `disabled`, `pauseDetails` and `pauseRevision` per entry. Runtime counters are process-local.
-Manual resume clears details and changes the revision, fencing already-sent refusals.
+Manual resume (including an already enabled key) clears details and changes the revision, fencing already-sent refusals.
 
 ## Opt-in permanent refusal recovery
 

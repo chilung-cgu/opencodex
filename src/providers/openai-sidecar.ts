@@ -340,7 +340,7 @@ export function selectImagesProvider(config: OcxConfig): OpenAiImagesProviderSel
       error: `images.provider "${providerName}" must be an API-key openai-responses provider`,
     };
   }
-  if (isProviderApiKeyPaused(provider)) {
+  if (provider.apiKeyPool?.length && provider.apiKeyPool.every(entry => entry.disabled === true)) {
     return { forwardCandidates: [], paused: true, error: new ProviderApiKeyPausedError().message };
   }
 
