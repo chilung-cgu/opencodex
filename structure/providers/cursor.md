@@ -1,7 +1,7 @@
 # Cursor Provider
 
 The configuration-only [plaintext V2 contract](../subagents.md#plaintext-v2-agent-messages)
-is scoped to canonical ChatGPT Responses forwarding; other source-area behavior described here is unchanged.
+is scoped to canonical ChatGPT Responses forwarding; other source-area behavior described here is unchanged. Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
 
 Codex-native retirement does not retire a Cursor-owned model name. Cursor transport and
 namespace handling retain their provider contract; the bounded native scope lives in

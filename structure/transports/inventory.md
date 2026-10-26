@@ -2,7 +2,7 @@
 
 WorkBuddy AI uses bounded fixed-origin login requests and shared Chat inference transport; see the [WorkBuddy contract](../providers/workbuddy.md).
 OpenCode Go's Gemini model uses the [Go Gemini transport contract](../providers/google.md#opencode-go-gemini-transport)
-through the Google adapter and the default server fetch path.
+through the Google adapter and the default server fetch path. Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
 
 Meta Muse's registry-owned compatibility User-Agent takes precedence over an incoming client User-Agent; explicit provider headers still win. See the [Muse provider contract](../providers-and-adapters.md).
 

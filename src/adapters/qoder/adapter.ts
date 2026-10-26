@@ -8,6 +8,7 @@ import { baseScopedEnv, runCodingAgentTurn, type CodingAgentDeps, type CodingAge
 import { QODER_PROFILES, resolveQoderProfile, type QoderProfile } from "./profiles";
 import { QoderScaffoldFilter, QODER_SCAFFOLD_ERROR_CODE, qoderScaffoldErrorMessage } from "./scaffold-guard";
 import { ToolEnvelopeEchoFilter } from "../../lib/tool-envelope-echo-filter";
+import { buildQoderConversationInput, qoderCnImageInputSupported } from "./image-input";
 
 export type QoderAdapterDeps = CodingAgentDeps;
 
@@ -275,6 +276,14 @@ export function createQoderAdapter(provider: OcxProviderConfig, deps: QoderAdapt
       yield { type: "error", message: "Qoder adapter uses runTurn; the fetch/parseStream path is disabled." };
     },
     async runTurn(parsed, incoming, emit): Promise<void> {
+      if (resolveQoderProfile(provider.baseUrl)?.region === "cn" && !qoderCnImageInputSupported(parsed)) {
+        emit({
+          type: "error", status: 400, errorType: "invalid_request_error",
+          code: "unsupported_input_modality", retryable: false,
+          message: "Qoder CN raw-image routing is verified only with qoderclicn 1.1.70, DeepSeek-Flash or Qwen3.8-Flash, and one base64 PNG in a single user turn on stream-json stdin. URL, multiple-image, tool-result and history replay surfaces remain unverified; use the vision sidecar for those inputs.",
+        });
+        return;
+      }
       let catalog: ReturnType<typeof buildCodingAgentToolCatalog>;
       try {
         catalog = buildCodingAgentToolCatalog(parsed, QODER_MCP_SERVER_NAME);
@@ -309,6 +318,7 @@ export function createQoderAdapter(provider: OcxProviderConfig, deps: QoderAdapt
       const system = buildSystemPrompt(parsed);
       await runCodingAgentTurn({
           profiles: QODER_PROFILES,
+          conversationInput: buildQoderConversationInput,
           classifyFailure: classifyQoderFailure,
           provider,
           parsed,
