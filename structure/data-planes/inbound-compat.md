@@ -1,7 +1,7 @@
 # Inbound Compatibility Surfaces
 
 The names used for these paths (native, translated, legacy bridge) and the declared per-feature
-dispositions are owned by [Protocol Paths](protocol-paths.md). Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
+dispositions are owned by [Protocol Paths](protocol-paths.md).
 
 Native result continuations and function-result injection follow [the mode-specific result and control contract](../transports/streaming-health.md#experimental-native-function-result-injection); this surface does not infer upstream support or alter its defaults.
 

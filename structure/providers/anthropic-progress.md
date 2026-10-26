@@ -10,7 +10,7 @@ Hidden-summary preferences suppress reasoning, not these user-facing updates.
 Signed history preserves source block order, including thinking between tool calls; unsigned
 cross-provider history retains the adapter's preface-before-tools repair.
 `tests/adapters/anthropic/anthropic-progress-updates.test.ts` exercises SSE/JSON presentation,
-exact replay, mixed block order, OAuth beta preservation and cancellation cleanup. Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
+exact replay, mixed block order, OAuth beta preservation and cancellation cleanup.
 
 ## Signed Anthropic progress commentary
 

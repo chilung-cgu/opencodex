@@ -1,7 +1,5 @@
 # Native Reasoning Retention
 
-Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
-
 ## Configuration and management
 
 `src/config/schema/native-reasoning-retention.ts` owns strict optional boolean `nativeReasoningRetention.modelSwitch` and `nativeReasoningRetention.accountSwitch` fields, both resolved off. Invalid disk blocks disable retention with a warning without discarding unrelated config; candidate writes reject invalid fields and unknown keys. Runtime scope and recovery precedence follow [native reasoning retention](#runtime-boundary).

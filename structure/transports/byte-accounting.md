@@ -1,6 +1,6 @@
 # Byte Accounting
 
-Native result continuations and function-result injection follow [the mode-specific result and control contract](streaming-health.md#experimental-native-function-result-injection); this surface does not infer upstream support or alter its defaults. Qoder CN image admission and Qoder-only omission markers follow the [coding-agent image contract](../providers/chat-compat.md#unmapped-modalities-are-recorded-not-dropped).
+Native result continuations and function-result injection follow [the mode-specific result and control contract](streaming-health.md#experimental-native-function-result-injection); this surface does not infer upstream support or alter its defaults.
 
 Native steering follows [the shared WebSocket contract](streaming-health.md#experimental-native-mid-turn-steering); this surface's defaults remain unchanged.
 
