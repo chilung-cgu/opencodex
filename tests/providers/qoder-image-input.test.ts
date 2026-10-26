@@ -9,6 +9,7 @@ import type { AdapterEvent, OcxMessage, OcxParsedRequest, OcxProviderConfig } fr
 import { createTestTranslatorBudget } from "../helpers/translator-budget";
 
 const enc = new TextEncoder();
+const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 beforeEach(() => clearQoderBinaryCache());
 
 function provider(overrides: Partial<OcxProviderConfig> = {}): OcxProviderConfig {
@@ -45,7 +46,7 @@ function fakeChild(frames: string[], options: { parked?: boolean; exitCode?: num
 }
 
 describe("Qoder image input", () => {
-  const png = { type: "image" as const, imageUrl: "data:image/png;base64,AA==" };
+  const png = { type: "image" as const, imageUrl: `data:image/png;base64,${tinyPng}` };
   const user = (content: Extract<OcxMessage, { role: "user" }>["content"]): OcxMessage => ({ role: "user", content, timestamp: 0 });
   const assistant = { role: "assistant" as const, content: [{ type: "text" as const, text: "response" }], timestamp: 1 };
 
@@ -87,7 +88,7 @@ describe("Qoder image input", () => {
     await adapter.runTurn!(parsed({ modelId, context: { messages: [user([{ type: "text", text: "colour?" }, png])] } }),
       { headers: new Headers(), translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
     expect(JSON.parse(stdin.trim()).message.content).toEqual([
-      { type: "text", text: "colour?" }, { type: "image", source: { type: "base64", media_type: "image/png", data: "AA==" } },
+      { type: "text", text: "colour?" }, { type: "image", source: { type: "base64", media_type: "image/png", data: tinyPng } },
     ]);
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
@@ -121,14 +122,14 @@ describe("Qoder image input", () => {
         return child;
       },
     });
-    const request = parsed({ modelId: "DeepSeek-Flash", context: { messages: [{ role: "user", content: [{ type: "image", imageUrl: "data:image/png;base64,AA==" }], timestamp: 0 }] } });
+    const request = parsed({ modelId: "DeepSeek-Flash", context: { messages: [user([png])] } });
     const events: AdapterEvent[] = [];
     await adapter.runTurn!(request, { headers: new Headers(), translatorBudget: createTestTranslatorBudget() }, event => events.push(event));
     expect(spawned).toBe(1);
     const wire = JSON.parse(stdin.trim());
     expect(wire.message.content).toContainEqual({
       type: "image",
-      source: { type: "base64", media_type: "image/png", data: "AA==" },
+      source: { type: "base64", media_type: "image/png", data: tinyPng },
     });
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
