@@ -758,5 +758,6 @@ test("order hint explains that fewer than 5 featured models fill remaining slots
   const tooltip = container.querySelector<HTMLElement>('[role="tooltip"]');
   expect(tooltip?.textContent).toContain("spawn_agent");
   expect(tooltip?.textContent).toContain("fewer than 5 models are featured");
+  expect(tooltip?.textContent).toContain("remaining slots are advertised by catalog priority");
   expect(tooltip?.textContent).toContain("feature 5 models to fully control the list");
 });
