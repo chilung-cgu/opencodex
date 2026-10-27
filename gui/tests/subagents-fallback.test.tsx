@@ -746,7 +746,7 @@ test.each(compatibilityCases)("V2 compatibility guidance: $name", async ({ model
   expect(requests.filter(request => request.method !== "GET")).toEqual([]);
 });
 
-test("order hint explains catalog fill and the custom model picker order exception", async () => {
+test("order hint explains visible featured model fill and the custom model picker order exception", async () => {
   await mount();
   const trigger = container.querySelector<HTMLButtonElement>(".swi-featured-head .ocx-tooltip");
   if (!trigger) throw new Error("Expected the order-hint tooltip trigger to be rendered");
@@ -757,7 +757,8 @@ test("order hint explains catalog fill and the custom model picker order excepti
   expect(trigger.getAttribute("aria-describedby")).toBeTruthy();
   const tooltip = container.querySelector<HTMLElement>('[role="tooltip"]');
   expect(tooltip?.textContent).toContain("spawn_agent");
-  expect(tooltip?.textContent).toContain("fewer than 5 models are featured");
+  expect(tooltip?.textContent).toContain("The order shown here sets positions 1–5 at the top of the Codex model picker and the default model candidates for spawn_agent.");
+  expect(tooltip?.textContent).toContain("fewer than 5 featured models are visible in the picker");
   expect(tooltip?.textContent).toContain("remaining slots are advertised by catalog priority");
-  expect(tooltip?.textContent).toContain("featuring 5 models fills the list unless a custom model picker order changes catalog priority");
+  expect(tooltip?.textContent).toContain("5 visible featured models fill the list unless a custom model picker order changes catalog priority");
 });
