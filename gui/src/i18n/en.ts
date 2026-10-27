@@ -1029,7 +1029,7 @@ export const en = {
   "sub.featured": "Featured",
   "sub.advanced": "Advanced",
   "sub.orderHintAria": "How this order is used",
-  "sub.orderHint": "The order shown here sets positions 1–5 at the top of the Codex model picker and the default model candidates for {cmd}. When fewer than 5 models are featured, remaining slots are advertised by catalog priority; feature 5 models to fully control the list.",
+  "sub.orderHint": "The order shown here sets positions 1–5 at the top of the Codex model picker and the default model candidates for {cmd}. When fewer than 5 models are featured, remaining slots are advertised by catalog priority; featuring 5 models fills the list unless a custom model picker order changes catalog priority.",
   "sub.noneSelected": "None selected — pick from the list below.",
   "sub.models": "Models",
   "sub.search": "Search models (native gpt + routed)…",

@@ -746,7 +746,7 @@ test.each(compatibilityCases)("V2 compatibility guidance: $name", async ({ model
   expect(requests.filter(request => request.method !== "GET")).toEqual([]);
 });
 
-test("order hint explains that fewer than 5 featured models fill remaining slots by catalog priority", async () => {
+test("order hint explains catalog fill and the custom model picker order exception", async () => {
   await mount();
   const trigger = container.querySelector<HTMLButtonElement>(".swi-featured-head .ocx-tooltip");
   if (!trigger) throw new Error("Expected the order-hint tooltip trigger to be rendered");
@@ -759,5 +759,5 @@ test("order hint explains that fewer than 5 featured models fill remaining slots
   expect(tooltip?.textContent).toContain("spawn_agent");
   expect(tooltip?.textContent).toContain("fewer than 5 models are featured");
   expect(tooltip?.textContent).toContain("remaining slots are advertised by catalog priority");
-  expect(tooltip?.textContent).toContain("feature 5 models to fully control the list");
+  expect(tooltip?.textContent).toContain("featuring 5 models fills the list unless a custom model picker order changes catalog priority");
 });
