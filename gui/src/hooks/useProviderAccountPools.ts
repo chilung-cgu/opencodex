@@ -251,11 +251,21 @@ export function useProviderAccountPools(deps: {
                 accounts: mergeQuotaRows(enriched, current[provider]?.accounts ?? [], true),
               },
             });
-            return !enriched.some(row => row.quotaUnavailable === true);
+            // Paused accounts are intentionally skipped; keep their row state without
+            // failing refreshes that successfully probed another quota-capable account.
+            const refreshable = enriched.filter(row => row.paused !== true && supportsQuotaRead(row));
+            return !refreshable.some(row => row.quotaUnavailable === true);
           } catch {
             if (!currentQuota()) return false;
             setAccountSets(current => currentQuota() && current[provider] ? {
-              ...current, [provider]: { ...current[provider], accounts: unavailableQuotaRows(current[provider].accounts, rows) },
+              ...current,
+              [provider]: {
+                ...current[provider],
+                accounts: unavailableQuotaRows(
+                  current[provider].accounts,
+                  rows.filter(row => row.paused !== true),
+                ),
+              },
             } : current);
             return false;
           }
@@ -311,11 +321,13 @@ export function useProviderAccountPools(deps: {
             setKeyPools(current => currentQuota() ? { ...current, [name]: currentRoster()
               ? mergeQuotaRows(enriched, current[name] ?? [], true)
               : mergeLateQuotaRows(current[name] ?? [], enriched) } : current);
-            return !enriched.some(row => row.quotaUnavailable === true);
+            const refreshable = enriched.filter(row => row.disabled !== true && supportsQuotaRead(row));
+            return !refreshable.some(row => row.quotaUnavailable === true);
           } catch {
+            const attempted = rows.filter(row => row.disabled !== true && supportsQuotaRead(row));
             if (currentQuota()) setKeyPools(current => currentQuota()
-              ? { ...current, [name]: unavailableQuotaRows(current[name] ?? [], rows) } : current);
-            return false;
+              ? { ...current, [name]: unavailableQuotaRows(current[name] ?? [], attempted) } : current);
+            return currentQuota() && attempted.length === 0;
           }
         };
         if (refresh) return await enrich();
