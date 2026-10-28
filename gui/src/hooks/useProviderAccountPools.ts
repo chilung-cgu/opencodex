@@ -324,10 +324,9 @@ export function useProviderAccountPools(deps: {
             const refreshable = enriched.filter(row => row.disabled !== true && supportsQuotaRead(row));
             return !refreshable.some(row => row.quotaUnavailable === true);
           } catch {
-            const attempted = rows.filter(row => row.disabled !== true && supportsQuotaRead(row));
             if (currentQuota()) setKeyPools(current => currentQuota()
-              ? { ...current, [name]: unavailableQuotaRows(current[name] ?? [], attempted) } : current);
-            return currentQuota() && attempted.length === 0;
+              ? { ...current, [name]: unavailableQuotaRows(current[name] ?? [], rows.filter(row => row.disabled !== true && supportsQuotaRead(row))) } : current);
+            return currentQuota() && !rows.some(row => row.disabled !== true && supportsQuotaRead(row));
           }
         };
         if (refresh) return await enrich();
