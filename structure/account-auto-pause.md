@@ -55,10 +55,10 @@ The opt-in counter defaults to two refusals; each process owns its counters. Dur
 uses `setAccountPaused`, `setCodexAccountPaused`, or
 `src/providers/api-key-pause.ts`; resume changes an incarnation fence and clears the reason.
 Key pool pause and resume mutate under `commitProviderApiKeySelection`, verifying the selection
-revision and policy fences. When the active key is paused, the active selection advances in ring
+revision and policy fences. An enabled row sharing the active reference preserves that reference when another row is paused or removed; active row identity prefers the first enabled matching row. When the last enabled row for the active reference is paused, the active selection advances in ring
 order to the next enabled entry; resuming an entry into an all-paused pool restores the active key.
 API-key selectors and reactive/proactive failover exclude disabled pool entries, including request-local round-robin allocation. A distributed refusal pauses its exact sending entry even when a different key is active, under the existing selection-revision fence. Recovery allocates a healthy sibling and reacquires its pacing lease before dispatch.
-If every key in a pool is paused, inference attempts fail closed with 403 `permission_error` before wire transport and without falling back to ambient environment or Application Default Credentials. Manual pause or resume clears key cooldowns and rotation cursors, and purges model and quota caches on active key transition. Quota probing skips disabled keys while preserving fresh last-good cached quota.
+When every key in a pool is paused, no paused key is dispatched. A request with no other eligible route fails closed with 403 `permission_error` before keyed wire transport; API-key selection never falls back to ambient environment credentials or Application Default Credentials. Manual pause or resume clears key cooldowns and rotation cursors, and purges model and quota caches on active key transition. Quota probing skips disabled keys while preserving fresh last-good cached quota.
 Regression coverage: `tests/oauth/oauth-account-auto-pause.test.ts` and
 `tests/responses/responses-account-auto-pause.test.ts` and `tests/providers/api-key-auto-pause-distribution.test.ts`.
 

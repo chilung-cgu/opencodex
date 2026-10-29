@@ -153,4 +153,25 @@ describe("account auto-pause management", () => {
     expect(h.config.providers.relay!.apiKey).toBe("key-b");
   });
 
+  test("API-key pause reports the enabled selection when duplicate references precede it", async () => {
+    const h = harness();
+    h.config.providers.relay = {
+      ...base,
+      authMode: "key",
+      apiKey: "shared-key",
+      apiKeyPool: [
+        { id: "paused-copy", key: "shared-key", disabled: true },
+        { id: "active-copy", key: "shared-key" },
+        { id: "next-copy", key: "shared-key" },
+      ],
+    };
+    writeFileSync(h.path, JSON.stringify(h.config));
+
+    const response = await h.request("PUT", { name: "relay", id: "active-copy", paused: true }, "/api/providers/keys/pause");
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ ok: true, activeAccountId: "next-copy", activeAccountChanged: true });
+    expect(h.config.providers.relay!.apiKey).toBe("shared-key");
+  });
+
 });

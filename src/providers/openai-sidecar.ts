@@ -303,7 +303,13 @@ export function selectOpenAiImagesProvider(config: OcxConfig, allowPausedActiveR
     && provider.baseUrl.replace(/\/+$/, "") === "https://api.openai.com/v1"
   ) {
     const canRecover = allowPausedActiveRecovery && provider.apiKeyPool?.some(entry => !entry.disabled);
-    if (isProviderApiKeyPaused(provider) && !canRecover) return selection;
+    if (isProviderApiKeyPaused(provider) && !canRecover) {
+      if (allowPausedActiveRecovery) {
+        selection.paused = true;
+        selection.error = new ProviderApiKeyPausedError().message;
+      }
+      return selection;
+    }
     const apiKey = resolveProviderApiKey(provider.apiKey)?.trim();
     if (apiKey) selection.keyed = { providerName: OPENAI_API_PROVIDER_ID, provider, apiKey };
   }

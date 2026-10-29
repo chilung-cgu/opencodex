@@ -62,6 +62,82 @@ test("a non-active distributed key pauses durably without changing the active ke
   for (let n = 0; n < 3; n++) expect(selectProactiveApiKeyTransport(config, "fixture", fresh)?.apiKey).toBe("synthetic-A");
 });
 
+test("auto-pause observes the enabled row when an earlier duplicate key reference is paused", async () => {
+  const config = getDefaultConfig();
+  config.providers = {
+    fixture: {
+      adapter: "openai-chat", authMode: "key", baseUrl: "https://example.test/v1",
+      apiKey: "synthetic-shared",
+      apiKeyPool: [
+        { id: "A", key: "synthetic-shared", disabled: true },
+        { id: "B", key: "synthetic-shared" },
+      ],
+      accountAutoPause: { enabled: true, consecutiveFailures: 1 },
+    },
+  };
+  saveConfig(config);
+
+  const provider = routedProviderConfig("fixture", config.providers.fixture!);
+  const observer = captureAccountAutoPauseAttempt("fixture", provider, { config },
+    new Headers({ authorization: `Bearer ${provider.apiKey}` }));
+  expect(observer).toBeDefined();
+  expect(provider._apiKeyAttempt?.entryId).toBe("B");
+
+  const response = await observer!(refusal());
+  expect(wasAccountAutoPaused(response)).toBe(true);
+  expect(config.providers.fixture!.apiKeyPool).toMatchObject([
+    { id: "A", key: "synthetic-shared", disabled: true },
+    { id: "B", key: "synthetic-shared", disabled: true, pauseDetails: { reason: "subscription_expired" } },
+  ]);
+  expect(config.providers.fixture!.apiKey).toBeUndefined();
+});
+
+test("repeating pause on a paused duplicate preserves the healthy active row", async () => {
+  const { setProviderApiKeyPausedWithResult } = await import("../../src/providers/api-key-pause");
+  const config = getDefaultConfig();
+  config.providers = {
+    fixture: {
+      adapter: "openai-chat", authMode: "key", baseUrl: "https://example.test/v1",
+      apiKey: "synthetic-shared",
+      apiKeyPool: [
+        { id: "active-copy", key: "synthetic-shared" },
+        { id: "paused-copy", key: "synthetic-shared", disabled: true },
+        { id: "next", key: "synthetic-next" },
+      ],
+    },
+  };
+  saveConfig(config);
+
+  const result = setProviderApiKeyPausedWithResult(config, "fixture", "paused-copy", true);
+
+  expect(result).toEqual({ ok: true, activeAccountId: "active-copy", activeAccountChanged: false });
+  expect(config.providers.fixture!.apiKey).toBe("synthetic-shared");
+  expect(loadConfig().providers.fixture!.apiKey).toBe("synthetic-shared");
+});
+
+test("pausing an enabled duplicate preserves an enabled same-reference selection", async () => {
+  const { setProviderApiKeyPausedWithResult } = await import("../../src/providers/api-key-pause");
+  const config = getDefaultConfig();
+  config.providers = {
+    fixture: {
+      adapter: "openai-chat", authMode: "key", baseUrl: "https://example.test/v1",
+      apiKey: "synthetic-shared",
+      apiKeyPool: [
+        { id: "active-copy", key: "synthetic-shared" },
+        { id: "paused-copy", key: "synthetic-shared" },
+        { id: "next", key: "synthetic-next" },
+      ],
+    },
+  };
+  saveConfig(config);
+
+  const result = setProviderApiKeyPausedWithResult(config, "fixture", "paused-copy", true);
+
+  expect(result).toEqual({ ok: true, activeAccountId: "active-copy", activeAccountChanged: false });
+  expect(config.providers.fixture!.apiKey).toBe("synthetic-shared");
+  expect(loadConfig().providers.fixture!.apiKey).toBe("synthetic-shared");
+});
+
 for (const change of ["revision", "disabled", "headers"] as const) test(`distributed pause rejects stale or unowned ${change}`, async () => {
   const { config, route } = fixture();
   const headers = new Headers({ authorization: `Bearer ${change === "headers" ? "synthetic-override" : route.apiKey}` });
@@ -484,3 +560,188 @@ for (const variant of [
     }
   });
 }
+
+test("default openai-apikey fallback with all keys paused returns 403 permission_error when no alternative upstream is usable, and still allows usable ChatGPT forward", async () => {
+  const { handleImages } = await import("../../src/server/images");
+  const { selectOpenAiImagesProvider } = await import("../../src/providers/openai-sidecar");
+  const { fakeChatGptJwt } = await import("../helpers/fake-chatgpt-jwt");
+  const previousFetch = globalThis.fetch;
+  const sentUrls: string[] = [];
+  const sentAuths: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    sentUrls.push(String(input));
+    sentAuths.push(new Headers(init?.headers).get("authorization") ?? "");
+    return Response.json({ data: [{ b64_json: "synthetic-image-base64" }] });
+  }) as typeof fetch;
+  try {
+    const config = getDefaultConfig();
+    config.providers = {
+      [OPENAI_API_PROVIDER_ID]: {
+        adapter: "openai-responses", authMode: "key", baseUrl: "https://api.openai.com/v1",
+        apiKey: undefined,
+        apiKeyPool: [{ id: "paused", key: "paused-key", disabled: true }],
+      },
+    };
+    saveConfig(config);
+
+    // Audio/Live default selector stays strict without setting paused error metadata.
+    const defaultSelection = selectOpenAiImagesProvider(config);
+    expect(defaultSelection.keyed).toBeUndefined();
+    expect(defaultSelection.paused).toBeUndefined();
+
+    // No forward or CCA candidate -> 403 permission_error (zero upstream sends).
+    const noAltRes = await handleImages(new Request("http://localhost/v1/images/generations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "cat" }),
+    }), config, "generations", { model: "", provider: "" });
+    expect(noAltRes.status, await noAltRes.clone().text()).toBe(403);
+    expect((await noAltRes.json() as { error?: { type?: string } }).error?.type).toBe("permission_error");
+    expect(sentUrls).toEqual([]);
+
+    // Direct forward candidate configured, but caller sent no ChatGPT bearer -> still 403 permission_error from paused key pool.
+    config.providers.openai = {
+      adapter: "openai-responses",
+      baseUrl: "https://chatgpt.com/backend-api/codex",
+      authMode: "forward",
+      codexAccountMode: "direct",
+    };
+    saveConfig(config);
+    const unauthForwardRes = await handleImages(new Request("http://localhost/v1/images/generations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "cat" }),
+    }), config, "generations", { model: "", provider: "" });
+    expect(unauthForwardRes.status, await unauthForwardRes.clone().text()).toBe(403);
+    expect((await unauthForwardRes.json() as { error?: { type?: string } }).error?.type).toBe("permission_error");
+    expect(sentUrls).toEqual([]);
+
+    // Direct forward candidate with valid caller ChatGPT bearer -> succeeds via forward despite all-paused key pool.
+    const token = fakeChatGptJwt({ chatgpt_account_id: "acct-forward-ok" });
+    const forwardOkRes = await handleImages(new Request("http://localhost/v1/images/generations", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        "chatgpt-account-id": "acct-forward-ok",
+      },
+      body: JSON.stringify({ prompt: "cat" }),
+    }), config, "generations", { model: "", provider: "" });
+    expect(forwardOkRes.status, await forwardOkRes.clone().text()).toBe(200);
+    expect(sentUrls).toEqual(["https://chatgpt.com/backend-api/codex/images/generations"]);
+    expect(sentAuths).toEqual([`Bearer ${token}`]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+for (const scenario of ["all-paused", "rotated-to-sibling", "rotated-to-unresolvable-sibling"] as const) {
+  test(`Images revalidates committed key selection when pause commits between selection and send (${scenario})`, async () => {
+    const { handleImages } = await import("../../src/server/images");
+    const { setProviderApiKeyPausedWithResult } = await import("../../src/providers/api-key-pause");
+    const previousFetch = globalThis.fetch;
+    const previousMissingSiblingKey = process.env.OCX_IMAGES_MISSING_SIBLING_KEY;
+    const sentAuths: string[] = [];
+    delete process.env.OCX_IMAGES_MISSING_SIBLING_KEY;
+    globalThis.fetch = (async (_input, init) => {
+      sentAuths.push(new Headers(init?.headers).get("authorization") ?? "");
+      return Response.json({ data: [{ b64_json: "synthetic-image-base64" }] });
+    }) as typeof fetch;
+    try {
+      const config = getDefaultConfig();
+      const siblingKey = scenario === "rotated-to-unresolvable-sibling"
+        ? "${OCX_IMAGES_MISSING_SIBLING_KEY}"
+        : "key-b";
+      config.providers = {
+        openai: {
+          adapter: "openai-responses",
+          baseUrl: "https://chatgpt.com/backend-api/codex",
+          authMode: "forward",
+          codexAccountMode: "direct",
+        },
+        [OPENAI_API_PROVIDER_ID]: {
+          adapter: "openai-responses", authMode: "key", baseUrl: "https://api.openai.com/v1",
+          apiKey: "key-a",
+          apiKeyPool: scenario === "all-paused"
+            ? [{ id: "A", key: "key-a" }]
+            : [{ id: "A", key: "key-a" }, { id: "B", key: siblingKey }],
+        },
+      };
+      saveConfig(config);
+
+      // Intercept the inbound authorization read in validateForwardAdmissionCredential,
+      // immediately after selectImagesProvider(config) captures candidates.keyed with key-a.
+      const req = new Request("http://localhost/v1/images/generations", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: "cat" }),
+      });
+      let pausedDuringFlight = false;
+      const origGet = req.headers.get.bind(req.headers);
+      req.headers.get = ((name: string) => {
+        if (!pausedDuringFlight && name.toLowerCase() === "authorization") {
+          pausedDuringFlight = true;
+          const pauseResult = setProviderApiKeyPausedWithResult(config, OPENAI_API_PROVIDER_ID, "A", true);
+          expect(pauseResult).toEqual({
+            ok: true,
+            activeAccountId: scenario === "all-paused" ? null : "B",
+            activeAccountChanged: true,
+          });
+        }
+        return origGet(name);
+      }) as typeof req.headers.get;
+
+      const response = await handleImages(req, config, "generations", { model: "", provider: "" });
+      expect(pausedDuringFlight).toBe(true);
+      if (scenario === "all-paused") {
+        expect(response.status, await response.clone().text()).toBe(403);
+        expect((await response.json() as { error?: { type?: string } }).error?.type).toBe("permission_error");
+        expect(sentAuths).toEqual([]);
+      } else if (scenario === "rotated-to-unresolvable-sibling") {
+        expect(response.status, await response.clone().text()).toBe(500);
+        expect((await response.json() as { error?: { message?: string } }).error?.message).toContain("cannot be resolved");
+        expect(sentAuths).toEqual([]);
+      } else {
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(sentAuths).toEqual(["Bearer key-b"]);
+        expect(config.providers[OPENAI_API_PROVIDER_ID]?.apiKey).toBe("key-b");
+        expect(loadConfig().providers[OPENAI_API_PROVIDER_ID]?.apiKey).toBe("key-b");
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+      if (previousMissingSiblingKey === undefined) delete process.env.OCX_IMAGES_MISSING_SIBLING_KEY;
+      else process.env.OCX_IMAGES_MISSING_SIBLING_KEY = previousMissingSiblingKey;
+    }
+  });
+}
+
+test("Images can send an enabled key reference when a duplicate pool row is paused", async () => {
+  const { handleImages } = await import("../../src/server/images");
+  const previousFetch = globalThis.fetch;
+  const sentAuths: string[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    sentAuths.push(new Headers(init?.headers).get("authorization") ?? "");
+    return Response.json({ data: [{ b64_json: "synthetic-image-base64" }] });
+  }) as typeof fetch;
+  try {
+    const config = getDefaultConfig();
+    config.providers = {
+      [OPENAI_API_PROVIDER_ID]: {
+        adapter: "openai-responses", authMode: "key", baseUrl: "https://api.openai.com/v1",
+        apiKey: "shared-key-reference",
+        apiKeyPool: [
+          { id: "paused-copy", key: "shared-key-reference", disabled: true },
+          { id: "active-copy", key: "shared-key-reference" },
+        ],
+      },
+    };
+    saveConfig(config);
+
+    const response = await handleImages(new Request("http://localhost/v1/images/generations", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "cat" }),
+    }), config, "generations", { model: "", provider: "" });
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(sentAuths).toEqual(["Bearer shared-key-reference"]);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

@@ -111,7 +111,10 @@ error rather than falling through to a separately billed keyed provider. The out
 has one selected Authorization value, validated before the non-idempotent upstream POST.
 Images providers, including the default OpenAI API fallback, can recover a stale paused active key
 to an enabled pool entry inside the keyed branch. Audio and Live retain their strict snapshot
-selector; only Images opts in to deferred recovery. An all-paused pool is refused before dispatch.
+selector; only Images opts in to deferred recovery. A fully paused pool never dispatches one of its
+keys. Implicit Images routing still tries eligible forward destinations and, for generations, CCA;
+if no alternative handles the request, the paused-pool error is 403 `permission_error`. An eligible
+alternative's own error retains its status, and an explicit custom provider remains fail-closed.
 The keyed path never
 enters `handleResponses`, so `src/server/images.ts` repeats
 `selectProactiveApiKeyTransport` inside the keyed branch and rebuilds Authorization from the

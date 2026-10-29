@@ -8,7 +8,7 @@ import { ProviderApiKeyPausedError, isProviderApiKeyPaused } from "./api-key-pau
 import { apiKeyPoolEntryId } from "./api-keys";
 import { clearKeyCooldowns } from "./api-key-cooldowns";
 import { resolveProviderApiKey } from "./api-key-resolve";
-import { commitProviderApiKeySelection } from "./api-key-selection";
+import { captureProviderApiKeySelection, commitProviderApiKeySelection } from "./api-key-selection";
 import { forgetApiKeyRotationCursor } from "./key-failover";
 import { clearProviderQuotaCacheFor } from "./quota/report-cache";
 
@@ -29,9 +29,10 @@ export function setProviderApiKeyPausedWithResult(config: OcxConfig, name: strin
     }
     const pool = provider.apiKeyPool?.length ? provider.apiKeyPool
       : provider.apiKey ? [{ id: apiKeyPoolEntryId(provider.apiKey), key: provider.apiKey }] : [];
-    const beforeActiveAccountId = pool.find(entry => entry.key === provider.apiKey)?.id ?? null;
+    const currentActiveAccountId = () => captureProviderApiKeySelection({ ...provider, apiKeyPool: pool }).entryId ?? null;
+    const beforeActiveAccountId = currentActiveAccountId();
     const resultForCurrentSelection = (ok: boolean): ProviderApiKeyPauseResult => {
-      const activeAccountId = pool.find(entry => entry.key === provider.apiKey)?.id ?? null;
+      const activeAccountId = currentActiveAccountId();
       return { ok, activeAccountId, activeAccountChanged: beforeActiveAccountId !== activeAccountId };
     };
     const entry = pool.find(e => e.id === id);
@@ -43,10 +44,11 @@ export function setProviderApiKeyPausedWithResult(config: OcxConfig, name: strin
     provider.apiKeyPool = pool;
     const idx = pool.indexOf(entry);
     const ordered = idx >= 0 ? [...pool.slice(idx + 1), ...pool.slice(0, idx)] : pool;
+    const hasEnabledActiveReference = () => pool.some(e => !e.disabled && e.key === provider.apiKey);
     const activeDisabled = () => !provider.apiKey
       || (pool.some(e => e.disabled && e.key === provider.apiKey) && !pool.some(e => !e.disabled && e.key === provider.apiKey));
     if (!automatic && paused && entry.disabled) {
-      if (provider.apiKey === entry.key) {
+      if (provider.apiKey === entry.key && !hasEnabledActiveReference()) {
         const next = ordered.find(e => !e.disabled);
         if (next) provider.apiKey = next.key;
         else delete provider.apiKey;
@@ -59,7 +61,7 @@ export function setProviderApiKeyPausedWithResult(config: OcxConfig, name: strin
     entry.pauseRevision = randomUUID();
     if (automatic) entry.pauseDetails = automatic.details;
     else delete entry.pauseDetails;
-    if (paused && provider.apiKey === entry.key) {
+    if (paused && provider.apiKey === entry.key && !hasEnabledActiveReference()) {
       const next = ordered.find(e => !e.disabled);
       if (next) provider.apiKey = next.key;
       else delete provider.apiKey;
