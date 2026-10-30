@@ -1,5 +1,6 @@
 import { captureAccountAutoPauseAttempt, wasAccountAutoPaused, wasPermanentAccountRefusal } from "../../oauth/account-auto-pause";
 import { spendLedgerStorageErrorResponse } from "./spend-storage-error";
+import { captureAdmissionPolicy } from "../capture-admission-policy";
 import { createPhysicalSendReporter, rebindPhysicalSend } from "../../lib/request-execution-budget";
 import { hasResponseMediaType } from "../../lib/http-response-semantics";
 import { createInferenceSendBudget } from "../inference/context";
@@ -320,6 +321,7 @@ function compactHandoffRoute(
 }
 
 export interface HandleResponsesCompactOptions {
+  advisorAdmissionPolicy?: import("../../types/admission-policy").CapturedAdmissionPolicy;
   compactionRoutingOverride?: CompactionRoutingOverride | null;
   nativeMainRefreshDependencies?: NativeMainRefreshDependencies;
   /** Release the listener's idle guard only after the complete request body is accepted. */
@@ -661,6 +663,7 @@ export async function handleResponsesCompact(
   admission?: DataPlaneAdmission,
   options: HandleResponsesCompactOptions = {},
 ): Promise<Response> {
+  options = { ...options, advisorAdmissionPolicy: options.advisorAdmissionPolicy ?? captureAdmissionPolicy(config, admission) };
   let body: unknown;
   try {
     body = await readJsonRequestBody(req, undefined, resolveInboundBodyLimitBytes(config.maxInboundBodyBytes));
@@ -1750,7 +1753,7 @@ export async function handleResponsesCompact(
     // fallback spend four more.
     // internalReq keeps only FORWARD_HEADERS, so the caller principal is resolved from req.
     const replayPrincipal = { clientPrincipalId: resolveContextPrincipal(req, config, admission) };
-    const response = await handleResponses(internalReq, config, logCtx, { abortSignal: req.signal, turnAdmissionLease, sendBudget, compactionRecoveryKind: "compaction-v1", compactionRoutingOverride: options.compactionRoutingOverride, replayPrincipal, ...(admission ? { admission } : {}) });
+    const response = await handleResponses(internalReq, config, logCtx, { abortSignal: req.signal, turnAdmissionLease, sendBudget, compactionRecoveryKind: "compaction-v1", compactionRoutingOverride: options.compactionRoutingOverride, advisorAdmissionPolicy: options.advisorAdmissionPolicy, replayPrincipal, ...(admission ? { admission } : {}) });
     if (req.signal.aborted) {
       void response.body?.cancel(req.signal.reason).catch(() => undefined);
       return formatErrorResponse(499, "client_cancelled", "Client cancelled compact request");
